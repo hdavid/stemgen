@@ -45,6 +45,7 @@ parser.add_argument(
     help="the path to the output folder",
 )
 parser.add_argument("-f", "--format", dest="FORMAT", default="alac", help="aac or alac")
+parser.add_argument("-w", default=False, action="store_true", help="Overwrite existing file")
 parser.add_argument("-d", "--device", dest="DEVICE", help="cpu or cuda or mps")
 parser.add_argument("-v", "--version", action="version", version=VERSION)
 parser.add_argument('-n', "--model_name", dest="MODEL_NAME", help="name of the model to use")
@@ -64,6 +65,8 @@ OUTPUT_PATH = (
 )   
 
 FORMAT = args.FORMAT
+
+OVERWRITE_EXISTING = args.w
 
 DEVICE = (
     args.DEVICE
@@ -428,13 +431,27 @@ if __name__ == "__main__":
         while INPUT_PATHS is not None and len(INPUT_PATHS)>0:
             for INPUT_PATH in INPUT_PATHS:
                 print(os.path.basename(INPUT_PATH))
-                os.chdir(PROCESS_DIR)
+                
                 OUTPUT_PATH = os.path.dirname(INPUT_PATH) + "/"
-                setup()
-                split_stems()
-                create_stem()
-                clean_dir()
-                print("")
+                BASE_PATH = os.path.basename(INPUT_PATH)
+                FILE_EXTENSION = os.path.splitext(BASE_PATH)[1]
+                FILE_NAME = strip_accents(BASE_PATH.removesuffix(FILE_EXTENSION))
+                
+                
+                if INPUT_PATH.endswith(".stem.m4a"):
+                    print("skipping! already a stem.")
+                    print("")
+                elif os.path.isfile(os.path.join(OUTPUT_PATH, f"{FILE_NAME}.stem.m4a")) and not OVERWRITE_EXISTING:
+                    print("skipping! a stem exist for this file")
+                    print("")
+                else:
+                    os.chdir(PROCESS_DIR)    
+                    setup()
+                    split_stems()
+                    create_stem()
+                    clean_dir()
+                    print("")
+                
             INPUT_PATHS = filedialog.askopenfilenames(title='.mp3')
     else:
         os.chdir(PROCESS_DIR)
