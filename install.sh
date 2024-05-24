@@ -1,1 +1,1 @@
-sudo ln -s ./stemgen.sh /usr/local/bin
+sudo ln -s `pwd`/stemgen.sh /usr/local/bin/stemgen 
