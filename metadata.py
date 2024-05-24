@@ -10,7 +10,7 @@ import mutagen
 
 
 def get_cover(FILE_EXTENSION, FILE_PATH, OUTPUT_PATH, FILE_NAME):
-    print("Extracting cover...")
+    #print("Extracting cover...")
 
     if FILE_EXTENSION in (".wav", ".wave", ".aif", ".aiff"):
         # Open the file
@@ -24,7 +24,7 @@ def get_cover(FILE_EXTENSION, FILE_PATH, OUTPUT_PATH, FILE_NAME):
             # Save the cover art to a file
             with open(f"{OUTPUT_PATH}/{FILE_NAME}/cover.jpg", "wb") as f:
                 f.write(cover)
-                print("Cover extracted from APIC tag.")
+                #print("Cover extracted from APIC tag.")
         else:
             print("Error: The file does not contain any cover art.")
     else:
@@ -38,20 +38,22 @@ def get_cover(FILE_EXTENSION, FILE_PATH, OUTPUT_PATH, FILE_NAME):
                 "copy",
                 f"{OUTPUT_PATH}/{FILE_NAME}/cover.jpg",
                 "-y",
-            ]
+            ],
+			stdout = subprocess.DEVNULL,
+			stderr = subprocess.DEVNULL,
         )
-        print("Cover extracted with ffmpeg.")
+        #print("Cover extracted with ffmpeg.")
 
-    print("Done.")
+    #print("Done.")
 
 
 def get_metadata(FILE_PATH, OUTPUT_PATH, FILE_NAME):
-    print("Extracting metadata...")
+    #print("Extracting metadata...")
 
     # Extract metadata with mutagen
     file = mutagen.File(FILE_PATH)
-    if file.tags is not None:
-        print(file.tags.pprint())
+    #if file.tags is not None:
+    #    print(file.tags.pprint())
 
     TAGS = {}
 
@@ -275,14 +277,14 @@ def get_metadata(FILE_PATH, OUTPUT_PATH, FILE_NAME):
     if os.path.exists(os.path.join(OUTPUT_PATH, FILE_NAME, "cover.jpg")):
         TAGS["cover"] = f"{os.path.join(OUTPUT_PATH, FILE_NAME, 'cover.jpg')}"
 
-    print(TAGS)
+    #print(TAGS)
 
-    print("Creating tags.json...")
+    #print("Creating tags.json...")
 
     with open(os.path.join(OUTPUT_PATH, FILE_NAME, "tags.json"), "w") as f:
         json.dump(TAGS, f)
 
-    print("Done.")
+    #print("Done.")
 
 
 def create_metadata_json(stems, path):

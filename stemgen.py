@@ -8,7 +8,9 @@ import subprocess
 from pathlib import Path
 import unicodedata
 import torch
+import demucs.separate
 from metadata import get_cover, get_metadata
+from tkinter import filedialog
 
 LOGO = r"""
  _____ _____ _____ _____ _____ _____ _____ 
@@ -18,7 +20,7 @@ LOGO = r"""
 
 """
 
-SUPPORTED_FILES = [".wave", ".wav", ".aiff", ".aif", ".flac"]
+SUPPORTED_FILES = [".wave", ".wav", ".aiff", ".aif", ".flac", ".mp3"]
 REQUIRED_PACKAGES = ["ffmpeg", "sox"]
 
 USAGE = f"""{LOGO}
@@ -52,7 +54,7 @@ parser.add_argument(
     help="the path to the output folder",
 )
 parser.add_argument("-f", "--format", dest="FORMAT", default="alac", help="aac or alac")
-parser.add_argument("-d", "--device", dest="DEVICE", help="cpu or cuda")
+parser.add_argument("-d", "--device", dest="DEVICE", help="cpu or cuda or mps")
 parser.add_argument("-v", "--version", action="version", version=VERSION)
 parser.add_argument('-n', "--model_name", dest="MODEL_NAME", help="name of the model to use")
 parser.add_argument('-s', "--model_shifts", dest="MODEL_SHIFTS", help="number of shifts for demucs to use")
@@ -64,19 +66,36 @@ OUTPUT_PATH = (
     if os.path.isabs(args.OUTPUT_PATH)
     else os.path.join(PROCESS_DIR, args.OUTPUT_PATH)
 )
+#import os
+#print(os.path.dirname(INPUT_PATH))
+
+#print(OUTPUT_PATH)
+
+#OUTPUT_PATH = "/Users/davidh01/Music/Stems/"
+#print(OUTPUT_PATH)
+
 FORMAT = args.FORMAT
+
+if INPUT_PATH is None:
+    INPUT_PATH = filedialog.askopenfilename(title='.mp3')
+
+
+OUTPUT_PATH = os.path.dirname(INPUT_PATH) + "/"
 
 # Automatically set DEVICE to "cuda" if CUDA is available, otherwise set it to "cpu"
 DEVICE = (
     args.DEVICE
     if args.DEVICE is not None
-    else ("cuda" if torch.cuda.is_available() else "cpu")
+    else ("cuda" if torch.cuda.is_available() else (
+	"mps" if torch.backends.mps.is_available() else "cpu"))
 )
-
-if DEVICE == "cuda":
-    print("Using GPU for processing.")
-else:
-    print("Using CPU for processing.")
+#DEVICE="cpu"
+#if DEVICE == "cuda":
+#    print("Using GPU.")
+#elif DEVICE == "mps":
+#    print("Using MPS.")
+#else:
+#    print("Using CPU.")
 
 PYTHON_EXEC = sys.executable if not None else "python3"
 
@@ -96,7 +115,7 @@ MODEL_SHIFTS = (
 
 
 def convert():
-    print("Converting to wav and/or downsampling...")
+    print("Converting to wav 44.1kHz.")
 
     # We downsample to 44.1kHz to avoid problems with the separation software
     # because the models are trained on 44.1kHz audio files
@@ -132,6 +151,8 @@ def convert():
                     "44100",
                 ],
                 check=True,
+    			stdout = subprocess.DEVNULL,
+    			stderr = subprocess.DEVNULL,
             )
             os.remove(converted_file_path)
             os.rename(
@@ -155,6 +176,8 @@ def convert():
                     "44100",
                 ],
                 check=True,
+    			stdout = subprocess.DEVNULL,
+    			stderr = subprocess.DEVNULL,
             )
         BIT_DEPTH = 24
     else:
@@ -181,6 +204,8 @@ def convert():
                         "44100",
                     ],
                     check=True,
+        			stdout = subprocess.DEVNULL,
+        			stderr = subprocess.DEVNULL,
                 )
                 os.remove(converted_file_path)
                 os.rename(
@@ -203,41 +228,52 @@ def convert():
                         "44100",
                     ],
                     check=True,
+        			stdout = subprocess.DEVNULL,
+        			stderr = subprocess.DEVNULL,
                 )
 
-    print("Done.")
+    #print("Done.")
 
 
 def split_stems():
-    print("Splitting stems...")
-
+    print("spliting using " + MODEL_NAME + " on " + DEVICE)
     if BIT_DEPTH == 24:
-        print("Using 24-bit model...")
-        subprocess.run(
-            [
-                PYTHON_EXEC,
-                "-m",
-                "demucs",
-                "--int24",
-                "-n",
-                MODEL_NAME,
-                "--shifts",
-                MODEL_SHIFTS,
-                "-d",
-                DEVICE,
-                FILE_PATH,
-                "-o",
-                f"{OUTPUT_PATH}/{FILE_NAME}",
-            ]
-        )
+        demucs.separate.main([
+                            "--int24",
+                            "-n",
+                            MODEL_NAME,
+                            "--shifts",
+                            MODEL_SHIFTS,
+                            "-d",
+                            DEVICE,
+                            FILE_PATH,
+                            "-o",
+                            f"{OUTPUT_PATH}/{FILE_NAME}"
+            ])
+            #         subprocess.run(
+            #             [
+            #                 PYTHON_EXEC,
+            #                 "-m",
+            #                 "demucs",
+            #                 "--int24",
+            #                 "-n",
+            #                 MODEL_NAME,
+            #                 "--shifts",
+            #                 MODEL_SHIFTS,
+            #                 "-d",
+            #                 DEVICE,
+            #                 FILE_PATH,
+            #                 "-o",
+            #                 f"{OUTPUT_PATH}/{FILE_NAME}",
+            #             ]
+            #             #,
+            # #stdout = subprocess.DEVNULL,
+            # #stderr = subprocess.DEVNULL,
+            #         )
     else:
-        print("Using 16-bit model...")
-        subprocess.run(
-            [
-                PYTHON_EXEC,
-                "-m",
-                "demucs",
-                "-n",
+        
+        
+        demucs.separate.main([ "-n",
                 MODEL_NAME,
                 "--shifts",
                 MODEL_SHIFTS,
@@ -245,15 +281,46 @@ def split_stems():
                 DEVICE,
                 FILE_PATH,
                 "-o",
-                f"{OUTPUT_PATH}/{FILE_NAME}",
-            ]
-        )
-
-    print("Done.")
-
+                f"{OUTPUT_PATH}/{FILE_NAME}"])
+        
+        
+        # subprocess.run(
+#             [
+#                 PYTHON_EXEC,
+#                 "-m",
+#                 "demucs",
+#                 "-n",
+#                 MODEL_NAME,
+#                 "--shifts",
+#                 MODEL_SHIFTS,
+#                 "-d",
+#                 DEVICE,
+#                 FILE_PATH,
+#                 "-o",
+#                 f"{OUTPUT_PATH}/{FILE_NAME}",
+#             ]
+#             #,
+#             #stdout = subprocess.DEVNULL,
+#             #stderr = subprocess.DEVNULL,
+#         )
 
 def create_stem():
-    print("Creating stem...")
+    print("Creating stem file " + FILE_NAME)
+    import ni_stem
+    stems = [
+        f"{OUTPUT_PATH}/{FILE_NAME}/{MODEL_NAME}/{FILE_NAME}/drums.wav",
+        f"{OUTPUT_PATH}/{FILE_NAME}/{MODEL_NAME}/{FILE_NAME}/bass.wav",
+        f"{OUTPUT_PATH}/{FILE_NAME}/{MODEL_NAME}/{FILE_NAME}/other.wav",
+        f"{OUTPUT_PATH}/{FILE_NAME}/{MODEL_NAME}/{FILE_NAME}/vocals.wav",
+    ]
+    mixdown = f"{OUTPUT_PATH}/{FILE_NAME}/{FILE_NAME}.wav"
+    tags =  f"{OUTPUT_PATH}/{FILE_NAME}/tags.json"
+    metadata = "metadata.json"
+    creator = ni_stem.StemCreator(mixdown, stems, FORMAT, metadata, tags)
+    creator.save()
+
+def create_stem_old():
+    print("Creating stem file " + FILE_NAME)
     os.chdir(INSTALL_DIR)
 
     stem_args = [PYTHON_EXEC, "ni-stem/ni-stem", "create", "-s"]
@@ -274,9 +341,11 @@ def create_stem():
         FORMAT,
     ]
 
-    subprocess.run(stem_args)
+    subprocess.run(stem_args,
+			stdout = subprocess.DEVNULL,
+			stderr = subprocess.DEVNULL,)
 
-    print("Done.")
+    #print("Done.")
 
 
 # SETUP
@@ -288,9 +357,9 @@ def setup():
             print(f"Please install {package} before running Stemgen.")
             sys.exit(2)
 
-    if not os.path.exists(os.path.join(INSTALL_DIR, "ni-stem/ni-stem")):
-        print("Please install ni-stem before running Stem.")
-        sys.exit(2)
+    #if not os.path.exists(os.path.join(INSTALL_DIR, "ni-stem/ni-stem")):
+    #    print("Please install ni-stem before running Stem.")
+    #    sys.exit(2)
 
     if (
         subprocess.run(
@@ -303,9 +372,7 @@ def setup():
 
     if not os.path.exists(OUTPUT_PATH):
         os.mkdir(OUTPUT_PATH)
-        print("Output dir created.")
-    else:
-        print("Output dir already exists.")
+        #print("Output dir created.")
 
     global BASE_PATH, FILE_EXTENSION
     BASE_PATH = os.path.basename(INPUT_PATH)
@@ -322,21 +389,14 @@ def setup():
     get_metadata(FILE_PATH, OUTPUT_PATH, FILE_NAME)
     convert()
 
-    print("Ready!")
+    #print("Ready!")
 
 
-def run():
-    print(f"Creating a Stem file for {FILE_NAME}...")
 
-    split_stems()
-    create_stem()
-    clean_dir()
-
-    print("Success! Have fun :)")
 
 
 def get_bit_depth():
-    print("Extracting bit depth...")
+    #print("Extracting bit depth...")
 
     global BIT_DEPTH
 
@@ -375,12 +435,12 @@ def get_bit_depth():
             )
         )
 
-    print(f"bits_per_sample={BIT_DEPTH}")
-    print("Done.")
+    #print(f"bits_per_sample={BIT_DEPTH}")
+    #print("Done.")
 
 
 def get_sample_rate():
-    print("Extracting sample rate...")
+    #print("Extracting sample rate...")
 
     global SAMPLE_RATE
 
@@ -401,8 +461,8 @@ def get_sample_rate():
         )
     )
 
-    print(f"sample_rate={SAMPLE_RATE}")
-    print("Done.")
+    #print(f"sample_rate={SAMPLE_RATE}")
+    #print("Done.")
 
 
 def strip_accents(text):
@@ -417,15 +477,13 @@ def setup_file():
     FILE_NAME = strip_accents(BASE_PATH.removesuffix(FILE_EXTENSION))
     INPUT_DIR = os.path.join(PROCESS_DIR, os.path.dirname(INPUT_PATH))
 
-    if os.path.exists(f"{OUTPUT_PATH}/{FILE_NAME}"):
-        print("Working dir already exists.")
-    else:
+    if not os.path.exists(f"{OUTPUT_PATH}/{FILE_NAME}"):
         os.mkdir(f"{OUTPUT_PATH}/{FILE_NAME}")
-        print("Working dir created.")
+        #print("Working dir created.")
 
     shutil.copy(INPUT_PATH, f"{OUTPUT_PATH}/{FILE_NAME}/{FILE_NAME}{FILE_EXTENSION}")
     FILE_PATH = f"{OUTPUT_PATH}/{FILE_NAME}/{FILE_NAME}{FILE_EXTENSION}"
-    print("Done.")
+    #print("Done.")
 
 
 def clean_dir():
@@ -433,9 +491,8 @@ def clean_dir():
 
     os.chdir(OUTPUT_PATH)
 
-    for file in os.listdir(INPUT_DIR):
-        if file.endswith(".m4a"):
-            os.remove(os.path.join(INPUT_DIR, file))
+    if os.path.isfile(os.path.join(OUTPUT_PATH, f"{FILE_NAME}.stem.m4a")):
+        os.remove(os.path.join(OUTPUT_PATH, f"{FILE_NAME}.stem.m4a"))
 
     if os.path.isfile(os.path.join(OUTPUT_PATH, FILE_NAME, f"{FILE_NAME}.stem.m4a")):
         os.rename(
@@ -452,6 +509,15 @@ def clean_dir():
 
     print("Done.")
 
+
+def run():
+    #print(f"Creating a Stem file for {FILE_NAME}...")
+
+    split_stems()
+    create_stem()
+    clean_dir()
+
+    #print("Success! Have fun :)")
 
 def main():
     setup()

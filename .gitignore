@@ -30,3 +30,5 @@ __pycache__/
 # Python dist and build
 dist/
 build/
+
+venv
