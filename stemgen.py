@@ -53,10 +53,6 @@ parser.add_argument('-s', "--model_shifts", dest="MODEL_SHIFTS", help="number of
 args = parser.parse_args()
 
 INPUT_PATH = args.POSITIONAL_INPUT_PATH or args.INPUT_PATH
-if INPUT_PATH is None:
-    LOOP=True
-else:
-    LOOP=False
 
 OUTPUT_PATH = (
     args.OUTPUT_PATH
@@ -422,40 +418,38 @@ def clean_dir():
             f"Permission error encountered. Directory {os.path.join(OUTPUT_PATH, FILE_NAME)} might still be in use."
         )
 
+    
+
+
+def run():
+    os.chdir(PROCESS_DIR)    
+    setup()
+    split_stems()
+    create_stem()
+    clean_dir()
     print("Done.")
 
+    
 
 if __name__ == "__main__":
-    if LOOP:
+    if INPUT_PATH is None:
         INPUT_PATHS = filedialog.askopenfilenames(title='.mp3')        
-        while INPUT_PATHS is not None and len(INPUT_PATHS)>0:
+        if INPUT_PATHS is not None and len(INPUT_PATHS)>0:
             for INPUT_PATH in INPUT_PATHS:
-                print(os.path.basename(INPUT_PATH))
+                
                 
                 OUTPUT_PATH = os.path.dirname(INPUT_PATH) + "/"
                 BASE_PATH = os.path.basename(INPUT_PATH)
                 FILE_EXTENSION = os.path.splitext(BASE_PATH)[1]
                 FILE_NAME = strip_accents(BASE_PATH.removesuffix(FILE_EXTENSION))
                 
-                
                 if INPUT_PATH.endswith(".stem.m4a"):
-                    print("skipping! already a stem.")
-                    print("")
+                    print("Skipping! Already a stem file: " + BASE_PATH)
                 elif os.path.isfile(os.path.join(OUTPUT_PATH, f"{FILE_NAME}.stem.m4a")) and not OVERWRITE_EXISTING:
-                    print("skipping! a stem exist for this file")
-                    print("")
+                    print("skipping! A stem exists for: " + BASE_PATH)
                 else:
-                    os.chdir(PROCESS_DIR)    
-                    setup()
-                    split_stems()
-                    create_stem()
-                    clean_dir()
+                    print("Splitting: " + BASE_PATH)
+                    run()
                     print("")
-                
-            INPUT_PATHS = filedialog.askopenfilenames(title='.mp3')
     else:
-        os.chdir(PROCESS_DIR)
-        setup()
-        split_stems()
-        create_stem()
-        clean_dir()
+       run()
