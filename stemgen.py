@@ -25,8 +25,6 @@ Supported input file format: {SUPPORTED_FILES}
 VERSION = "6.0.0"
 INSTALL_DIR = Path(__file__).parent.absolute()
 PROCESS_DIR = os.getcwd()
-print (INSTALL_DIR)
-print (PROCESS_DIR)
 
 parser = argparse.ArgumentParser(
     description=USAGE, formatter_class=argparse.RawTextHelpFormatter
