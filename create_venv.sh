@@ -2,6 +2,12 @@
 rm -rf venv
 python3 -m venv venv
 source venv/bin/activate
+python3 -m  pip install --upgrade pip
 python3 -m pip install -U demucs
 python3 -m pip install mutagen
+#needs to force numpy1.x.
+python3 -m pip uninstall numpy
+python3 -m  pip install numpy==1.26.4
+python3 -m pip install -r requirements.txt
+
 

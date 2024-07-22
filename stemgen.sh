@@ -4,4 +4,4 @@ DIR="$(dirname "$(readlink "$0")")"
 cd $DIR
 
 source venv/bin/activate
-python3 stemgen.py "$@"
+python3 StemGenApp.py

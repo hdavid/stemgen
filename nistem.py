@@ -109,7 +109,7 @@ class StemCreator:
     ]
 
     def __init__(
-        self, mixdownTrack, stemTracks, fileFormat, metadataFile=None, tags=None
+        self, mixdownTrack, stemTracks, fileFormat, metadata={}, tags=None
     ):
         self._mixdownTrack = mixdownTrack
         self._stemTracks = stemTracks
@@ -119,23 +119,10 @@ class StemCreator:
         # Mutagen complains gravely if we do not explicitly convert the tag values to a
         # particular encoding. We chose UTF-8, others would work as well.
         # for key, value in self._tags.iteritems(): self._tags[key] = repr(value).encode('utf-8')
-
-        metaData = []
-        if metadataFile:
-            fileObj = codecs.open(metadataFile, encoding="utf-8")
-            try:
-                metaData = json.load(fileObj)
-            except IOError:
-                raise
-            except Exception as e:
-                raise RuntimeError("Error while reading metadata file")
-            finally:
-                fileObj.close()
-
         numStems = len(stemTracks)
-        numMetaEntries = len(metaData["stems"])
+        numMetaEntries = len(metadata["stems"])
 
-        self._metadata = metaData
+        self._metadata = metadata
 
         # If the input JSON file contains less metadata entries than there are stem tracks, we use the default
         # entries. If even those are not enough, we pad the remaining entries with the following default value:
@@ -244,12 +231,15 @@ class StemCreator:
 
         outputFilePath = "".join([root, stemOutExtension])
         _removeFile(outputFilePath)
-
+        
         folderName = "GPAC_win" if _windows else "GPAC_mac" if _macos else "GPAC_linux"
         executable = "mp4box.exe" if _windows else "mp4box" if _macos else "MP4Box"
-        mp4box = os.path.join(_getProgramPath(), folderName, executable)
+        if (getattr(sys, 'frozen', False)):# and hasattr(sys, '_MEIPASS')):
+            # no folder for mp4box when running in pyinstaller
+            mp4box = os.path.join(_getProgramPath(), executable)
+        else:
+            mp4box = os.path.join(_getProgramPath(), folderName, executable)
 
-        #print("\n[Done 0/6]\n")
         sys.stdout.flush()
 
         callArgs = [mp4box]
@@ -260,7 +250,6 @@ class StemCreator:
                 outputFilePath,
             ]
         )
-        #print("\n[Done 1/6]\n")
         sys.stdout.flush()
         conversionCounter = 1
         for stemTrack in self._stemTracks:

@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import argparse
 import os
 import shutil
@@ -7,170 +5,169 @@ import sys
 import subprocess
 from pathlib import Path
 import unicodedata
+import traceback
 import torch
 import demucs.separate
 from metadata import get_cover, get_metadata
 from tkinter import filedialog
 
+from nistem import StemCreator
 
-SUPPORTED_FILES = [".wave", ".wav", ".aiff", ".aif", ".flac", ".mp3"]
-REQUIRED_PACKAGES = ["ffmpeg", "sox"]
-USAGE = f"""
-Stemgen is a Stem file generator. Convert any track into a stem and have fun with Traktor.
+from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
 
-Usage: python3 stemgen.py -i [INPUT_PATH] -o [OUTPUT_PATH]
-
-Supported input file format: {SUPPORTED_FILES}
-"""
-VERSION = "6.0.0"
-INSTALL_DIR = Path(__file__).parent.absolute()
-PROCESS_DIR = os.getcwd()
-
-parser = argparse.ArgumentParser(
-    description=USAGE, formatter_class=argparse.RawTextHelpFormatter
-)
-parser.add_argument(
-    dest="POSITIONAL_INPUT_PATH", nargs="?", help="the path to the input file"
-)
-parser.add_argument(
-    "-i", "--input", dest="INPUT_PATH", help="the path to the input file"
-)
-parser.add_argument(
-    "-o",
-    "--output",
-    dest="OUTPUT_PATH",
-    default="output"
-    if str(INSTALL_DIR) == PROCESS_DIR or INSTALL_DIR.as_posix() == PROCESS_DIR
-    else ".",
-    help="the path to the output folder",
-)
-parser.add_argument("-f", "--format", dest="FORMAT", default="alac", help="aac or alac")
-parser.add_argument("-w", default=False, action="store_true", help="Overwrite existing file")
-parser.add_argument("-d", "--device", dest="DEVICE", help="cpu or cuda or mps")
-parser.add_argument("-v", "--version", action="version", version=VERSION)
-parser.add_argument('-n', "--model_name", dest="MODEL_NAME", help="name of the model to use")
-parser.add_argument('-s', "--model_shifts", dest="MODEL_SHIFTS", help="number of shifts for demucs to use")
-args = parser.parse_args()
-
-INPUT_PATH = args.POSITIONAL_INPUT_PATH or args.INPUT_PATH
-
-OUTPUT_PATH = (
-    args.OUTPUT_PATH
-    if os.path.isabs(args.OUTPUT_PATH)
-    else os.path.join(PROCESS_DIR, args.OUTPUT_PATH)
-)   
-
-FORMAT = args.FORMAT
-
-OVERWRITE_EXISTING = args.w
 
 DEVICE = (
-    args.DEVICE
-    if args.DEVICE is not None
-    else ("cuda" if torch.cuda.is_available() else (
-	"mps" if torch.backends.mps.is_available() else "cpu"))
+    ("cuda" if torch.cuda.is_available() else (
+    "mps" if torch.backends.mps.is_available() else "cpu"))
 )
 
-PYTHON_EXEC = sys.executable if not None else "python3"
+class StemGen(QObject):
+    song_processing = pyqtSignal(str)
+    counts = pyqtSignal(str, int, int, int, int)
+    details_update = pyqtSignal(str)
+    
+    def __init__(self):
+        super(StemGen, self).__init__()
+        
+        self.supported_files = [".wave", ".wav", ".aiff", ".aif", ".flac", ".mp3"]
+        self.required_packages = ["ffmpeg", "sox"]
+        
+        self.model_name = "htdemucs"
+        self.model_shifts = "1"
+        self.overwrite_existing = False
+        
+        self.tracks = []
+        self.processed_tracks = []
+        self.skipped_tracks = []
+        self.failed_tracks = []
+        self.errors = []
+        
+        
+    @property
+    def track_count(self):
+        return len(self.tracks)
+        
+        
+    @property
+    def processed_track_count(self):
+        return len(self.processed_tracks)
+    
+    
+    @property
+    def skipped_track_count(self):
+        return len(self.skipped_tracks)
+    
+    
+    @property
+    def failed_track_count(self):
+        return len(self.failed_tracks)
+       
+ 
+    def run(self, tracks):
+        try:
+            self.setup()
+        except Exception as exc:
+            print(traceback.format_exc())
+            self.emit_error(exc)
+            return
+            
+        self.tracks = tracks
+        if self.tracks is not None and len(tracks)>0:
+            for track in self.tracks:
+                directory = os.path.dirname(track) + "/"
+                filename = os.path.basename(track)
+                filename_extension = os.path.splitext(filename)[1]
+                filename_without_extension = filename.removesuffix(filename_extension)
+                self.song_processing.emit(filename_without_extension)
+                self.update_track_counts_ui("processing")
+                if track.endswith(".stem.m4a"):
+                    self.skipped_tracks.append(filename_without_extension)
+                    self.update_track_counts_ui("processing - skipping (already a stem)")
+                    
+                elif os.path.isfile(os.path.join(directory, f"{filename_without_extension}.stem.m4a")) and not self.overwrite_existing:
+                    self.skipped_tracks.append(filename_without_extension)
+                    self.update_track_counts_ui("processing - skipping (already stemmed)")
+                    
+                else:
+                    try:
+                        self.update_track_counts_ui("Processing - preparing")
+                        copied_track, bit_depth = self.prepare(track, directory, filename, filename_extension, filename_without_extension)
+                        self.update_track_counts_ui("Processing - splitting using " + DEVICE)
+                        self.split_stems(copied_track, directory, filename, filename_extension, filename_without_extension, bit_depth)
+                        self.update_track_counts_ui("Processing - saving")
+                        self.create_stem(directory, filename, filename_extension, filename_without_extension)
+                        self.update_track_counts_ui("Processing - cleaning")
+                        self.clean_dir(directory, filename_without_extension)
+                        self.processed_tracks.append(filename_without_extension)
+                        self.update_track_counts_ui("Processing - done")
+                    except Exception as exc:
+                        print(traceback.format_exc())
+                        self.emit_error(exc)
+                        self.failed_tracks.append(filename_without_extension)
+                        self.update_track_counts_ui("Processing - error")
+            self.print_report()
+                
+    
+    def print_report(self):
+        self.update_track_counts_ui("Done !")
+        self.song_processing.emit("")
+        details = ""
+        
+        if self.failed_track_count>0:
+            details += "Processed Tracks:"
+            for track in self.failed_tracks:
+                details += "\n\t" + track
+            details +="\n"
+            
+        if len(self.errors)>0:
+            details += "Errors:"
+            for error in self.errors:
+                details += "\n\t" + error
+            details +="\n"
+                
+        if self.processed_track_count>0:
+            details += "Processed Tracks:"        
+            for track in self.processed_tracks:
+                details += "\n\t" + track
+            details +="\n"
+        self.details_update.emit(details)
+            
+        
+    def emit_error(self, error:str):
+        self.errors.append(error)
+        self.details_update.emit(', '.join(str(x) for x in self.errors)  )
+    
+    
+    def update_track_counts_ui(self, message):
+        print(message)
+        self.counts.emit(message, self.track_count, self.processed_track_count, self.skipped_track_count, self.failed_track_count)  
+    
 
-MODEL_NAME = (
-    args.MODEL_NAME
-    if args.MODEL_NAME is not None
-    else "htdemucs"
-)
+    def convert(self, copied_track, directory, filename, filename_extension, filename_without_extension, bit_depth, sample_rate):
+        # We downsample to 44.1kHz to avoid problems with the separation software
+        # because the models are trained on 44.1kHz audio files
 
-MODEL_SHIFTS = (
-    args.MODEL_SHIFTS
-    if args.MODEL_SHIFTS is not None
-    else "1"
-)
+        # QUALITY            WIDTH  REJ dB   TYPICAL USE
+        # -v  very high      95%     175     24-bit mastering
 
-
-# CONVERSION AND GENERATION
+        # -M/-I/-L     Phase response = minimum/intermediate/linear(default)
+        # -s           Steep filter (band-width = 99%)
+        # -a           Allow aliasing above the pass-band
 
 
-def convert():
-    print("Converting to wav 44.1kHz.")
+        converted_file_path = os.path.join(directory, filename_without_extension, filename_without_extension + ".wav")
 
-    # We downsample to 44.1kHz to avoid problems with the separation software
-    # because the models are trained on 44.1kHz audio files
-
-    # QUALITY            WIDTH  REJ dB   TYPICAL USE
-    # -v  very high      95%     175     24-bit mastering
-
-    # -M/-I/-L     Phase response = minimum/intermediate/linear(default)
-    # -s           Steep filter (band-width = 99%)
-    # -a           Allow aliasing above the pass-band
-
-    global BIT_DEPTH
-    global SAMPLE_RATE
-
-    converted_file_path = os.path.join(OUTPUT_PATH, FILE_NAME, FILE_NAME + ".wav")
-
-    if BIT_DEPTH == 32:
-        # Downconvert to 24-bit
-        if FILE_PATH == converted_file_path:
-            subprocess.run(
-                [
-                    "sox",
-                    FILE_PATH,
-                    "--show-progress",
-                    "-b",
-                    "24",
-                    os.path.join(OUTPUT_PATH, FILE_NAME, FILE_NAME + ".24bit.wav"),
-                    "rate",
-                    "-v",
-                    "-a",
-                    "-I",
-                    "-s",
-                    "44100",
-                ],
-                check=True,
-    			stdout = subprocess.DEVNULL,
-    			stderr = subprocess.DEVNULL,
-            )
-            os.remove(converted_file_path)
-            os.rename(
-                os.path.join(OUTPUT_PATH, FILE_NAME, FILE_NAME + ".24bit.wav"),
-                converted_file_path,
-            )
-        else:
-            subprocess.run(
-                [
-                    "sox",
-                    FILE_PATH,
-                    "--show-progress",
-                    "-b",
-                    "24",
-                    converted_file_path,
-                    "rate",
-                    "-v",
-                    "-a",
-                    "-I",
-                    "-s",
-                    "44100",
-                ],
-                check=True,
-    			stdout = subprocess.DEVNULL,
-    			stderr = subprocess.DEVNULL,
-            )
-        BIT_DEPTH = 24
-    else:
-        if (
-            FILE_EXTENSION == ".wav" or FILE_EXTENSION == ".wave"
-        ) and SAMPLE_RATE == 44100:
-            print("No conversion needed.")
-        else:
-            if FILE_PATH == converted_file_path:
+        if bit_depth == 32:
+            # Downconvert to 24-bit
+            if copied_track == converted_file_path:
                 subprocess.run(
                     [
                         "sox",
-                        FILE_PATH,
+                        copied_track,
                         "--show-progress",
-                        "--no-dither",
-                        os.path.join(
-                            OUTPUT_PATH, FILE_NAME, FILE_NAME + ".44100Hz.wav"
-                        ),
+                        "-b",
+                        "24",
+                        os.path.join(directory, filename_without_extension, filename_without_extension + ".24bit.wav"),
                         "rate",
                         "-v",
                         "-a",
@@ -184,16 +181,17 @@ def convert():
                 )
                 os.remove(converted_file_path)
                 os.rename(
-                    os.path.join(OUTPUT_PATH, FILE_NAME, FILE_NAME + ".44100Hz.wav"),
+                    os.path.join(directory, filename_without_extension, filename_without_extension + ".24bit.wav"),
                     converted_file_path,
                 )
             else:
                 subprocess.run(
                     [
                         "sox",
-                        FILE_PATH,
+                        copied_track,
                         "--show-progress",
-                        "--no-dither",
+                        "-b",
+                        "24",
                         converted_file_path,
                         "rate",
                         "-v",
@@ -206,250 +204,238 @@ def convert():
         			stdout = subprocess.DEVNULL,
         			stderr = subprocess.DEVNULL,
                 )
-
-
-def split_stems():
-    print("spliting using " + MODEL_NAME + " on " + DEVICE)
-    if BIT_DEPTH == 24:
-        demucs.separate.main([
-                            "--int24",
-                            "-n",
-                            MODEL_NAME,
-                            "--shifts",
-                            MODEL_SHIFTS,
-                            "-d",
-                            DEVICE,
-                            FILE_PATH,
-                            "-o",
-                            f"{OUTPUT_PATH}/{FILE_NAME}"
-            ])
-    else:
-        demucs.separate.main([ "-n",
-                MODEL_NAME,
-                "--shifts",
-                MODEL_SHIFTS,
-                "-d",
-                DEVICE,
-                FILE_PATH,
-                "-o",
-                f"{OUTPUT_PATH}/{FILE_NAME}"])
-
-
-def create_stem():
-    print("Creating stem file " + FILE_NAME)
-    os.chdir(INSTALL_DIR)
-    import ni_stem
-    stems = [
-        f"{OUTPUT_PATH}/{FILE_NAME}/{MODEL_NAME}/{FILE_NAME}/drums.wav",
-        f"{OUTPUT_PATH}/{FILE_NAME}/{MODEL_NAME}/{FILE_NAME}/bass.wav",
-        f"{OUTPUT_PATH}/{FILE_NAME}/{MODEL_NAME}/{FILE_NAME}/other.wav",
-        f"{OUTPUT_PATH}/{FILE_NAME}/{MODEL_NAME}/{FILE_NAME}/vocals.wav",
-    ]
-    mixdown = f"{OUTPUT_PATH}/{FILE_NAME}/{FILE_NAME}.wav"
-    tags =  f"{OUTPUT_PATH}/{FILE_NAME}/tags.json"
-    metadata = "metadata.json"
-    creator = ni_stem.StemCreator(mixdown, stems, FORMAT, metadata, tags)
-    creator.save()
-
-def create_stem_old():
-    print("Creating stem file " + FILE_NAME)
-
-    stem_args = [PYTHON_EXEC, "ni-stem/ni-stem", "create", "-s"]
-    stem_args += [
-        f"{OUTPUT_PATH}/{FILE_NAME}/{MODEL_NAME}/{FILE_NAME}/drums.wav",
-        f"{OUTPUT_PATH}/{FILE_NAME}/{MODEL_NAME}/{FILE_NAME}/bass.wav",
-        f"{OUTPUT_PATH}/{FILE_NAME}/{MODEL_NAME}/{FILE_NAME}/other.wav",
-        f"{OUTPUT_PATH}/{FILE_NAME}/{MODEL_NAME}/{FILE_NAME}/vocals.wav",
-    ]
-    stem_args += [
-        "-x",
-        f"{OUTPUT_PATH}/{FILE_NAME}/{FILE_NAME}.wav",
-        "-t",
-        f"{OUTPUT_PATH}/{FILE_NAME}/tags.json",
-        "-m",
-        "metadata.json",
-        "-f",
-        FORMAT,
-    ]
-
-    subprocess.run(stem_args,
-			stdout = subprocess.DEVNULL,
-			stderr = subprocess.DEVNULL,)
-
-
-# SETUP
-
-
-def setup():
-    for package in REQUIRED_PACKAGES:
-        if not shutil.which(package):
-            print(f"Please install {package} before running Stemgen.")
-            sys.exit(2)
-
-    if (
-        subprocess.run(
-            [PYTHON_EXEC, "-m", "demucs", "-h"], capture_output=True, text=True
-        ).stdout.strip()
-        == ""
-    ):
-        print("Please install demucs before running Stemgen.")
-        sys.exit(2)
-
-    if not os.path.exists(OUTPUT_PATH):
-        os.mkdir(OUTPUT_PATH)
-
-    global BASE_PATH, FILE_EXTENSION
-    BASE_PATH = os.path.basename(INPUT_PATH)
-    FILE_EXTENSION = os.path.splitext(BASE_PATH)[1]
-
-    if FILE_EXTENSION not in SUPPORTED_FILES:
-        print("Invalid input file format. File should be one of:", SUPPORTED_FILES)
-        sys.exit(1)
-
-    setup_file()
-    get_bit_depth()
-    get_sample_rate()
-    get_cover(FILE_EXTENSION, FILE_PATH, OUTPUT_PATH, FILE_NAME)
-    get_metadata(FILE_PATH, OUTPUT_PATH, FILE_NAME)
-    convert()
-
-
-
-def get_bit_depth():
-  
-    global BIT_DEPTH
-
-    if FILE_EXTENSION == ".flac":
-        BIT_DEPTH = int(
-            subprocess.check_output(
-                [
-                    "ffprobe",
-                    "-v",
-                    "error",
-                    "-select_streams",
-                    "a",
-                    "-show_entries",
-                    "stream=bits_per_raw_sample",
-                    "-of",
-                    "default=noprint_wrappers=1:nokey=1",
-                    FILE_PATH,
-                ]
-            )
-        )
-    else:
-        BIT_DEPTH = int(
-            subprocess.check_output(
-                [
-                    "ffprobe",
-                    "-v",
-                    "error",
-                    "-select_streams",
-                    "a",
-                    "-show_entries",
-                    "stream=bits_per_sample",
-                    "-of",
-                    "default=noprint_wrappers=1:nokey=1",
-                    FILE_PATH,
-                ]
-            )
-        )
-
-
-
-def get_sample_rate():
-
-    global SAMPLE_RATE
-
-    SAMPLE_RATE = int(
-        subprocess.check_output(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-select_streams",
-                "a",
-                "-show_entries",
-                "stream=sample_rate",
-                "-of",
-                "default=noprint_wrappers=1:nokey=1",
-                FILE_PATH,
-            ]
-        )
-    )
-
-
-def strip_accents(text):
-    text = unicodedata.normalize("NFKD", text)
-    text = text.encode("ascii", "ignore")
-    text = text.decode("utf-8")
-    return str(text)
-
-
-def setup_file():
-    global FILE_NAME, INPUT_DIR, FILE_PATH
-    FILE_NAME = strip_accents(BASE_PATH.removesuffix(FILE_EXTENSION))
-    INPUT_DIR = os.path.join(PROCESS_DIR, os.path.dirname(INPUT_PATH))
-
-    if not os.path.exists(f"{OUTPUT_PATH}/{FILE_NAME}"):
-        os.mkdir(f"{OUTPUT_PATH}/{FILE_NAME}")
-
-    shutil.copy(INPUT_PATH, f"{OUTPUT_PATH}/{FILE_NAME}/{FILE_NAME}{FILE_EXTENSION}")
-    FILE_PATH = f"{OUTPUT_PATH}/{FILE_NAME}/{FILE_NAME}{FILE_EXTENSION}"
-
-
-def clean_dir():
-    print("Cleaning...")
-
-    os.chdir(OUTPUT_PATH)
-
-    if os.path.isfile(os.path.join(OUTPUT_PATH, f"{FILE_NAME}.stem.m4a")):
-        os.remove(os.path.join(OUTPUT_PATH, f"{FILE_NAME}.stem.m4a"))
-
-    if os.path.isfile(os.path.join(OUTPUT_PATH, FILE_NAME, f"{FILE_NAME}.stem.m4a")):
-        os.rename(
-            os.path.join(OUTPUT_PATH, FILE_NAME, f"{FILE_NAME}.stem.m4a"),
-            os.path.join(OUTPUT_PATH, f"{FILE_NAME}.stem.m4a"),
-        )
-
-    try:
-        shutil.rmtree(os.path.join(OUTPUT_PATH, FILE_NAME))
-    except PermissionError:
-        print(
-            f"Permission error encountered. Directory {os.path.join(OUTPUT_PATH, FILE_NAME)} might still be in use."
-        )
-
-    
-
-
-def run():
-    os.chdir(PROCESS_DIR)    
-    setup()
-    split_stems()
-    create_stem()
-    clean_dir()
-    print("Done.")
-
-    
-
-if __name__ == "__main__":
-    if INPUT_PATH is None:
-        INPUT_PATHS = filedialog.askopenfilenames(title='.mp3')        
-        if INPUT_PATHS is not None and len(INPUT_PATHS)>0:
-            for INPUT_PATH in INPUT_PATHS:
-                
-                
-                OUTPUT_PATH = os.path.dirname(INPUT_PATH) + "/"
-                BASE_PATH = os.path.basename(INPUT_PATH)
-                FILE_EXTENSION = os.path.splitext(BASE_PATH)[1]
-                FILE_NAME = strip_accents(BASE_PATH.removesuffix(FILE_EXTENSION))
-                
-                if INPUT_PATH.endswith(".stem.m4a"):
-                    print("Skipping! Already a stem file: " + BASE_PATH)
-                elif os.path.isfile(os.path.join(OUTPUT_PATH, f"{FILE_NAME}.stem.m4a")) and not OVERWRITE_EXISTING:
-                    print("skipping! A stem exists for: " + BASE_PATH)
+            BIT_DEPTH = 24
+        else:
+            if (
+                filename_extension == ".wav" or filename_extension == ".wave"
+            ) and sample_rate == 44100:
+                pass
+                # No conversion needed.
+            else:
+                if copied_track == converted_file_path:
+                    subprocess.run(
+                        [
+                            "sox",
+                            copied_track,
+                            "--show-progress",
+                            "--no-dither",
+                            os.path.join(
+                                directory, filename_without_extension, filename_without_extension + ".44100Hz.wav"
+                            ),
+                            "rate",
+                            "-v",
+                            "-a",
+                            "-I",
+                            "-s",
+                            "44100",
+                        ],
+                        check=True,
+            			stdout = subprocess.DEVNULL,
+            			stderr = subprocess.DEVNULL,
+                    )
+                    os.remove(converted_file_path)
+                    os.rename(
+                        os.path.join(directory, filename_without_extension, filename_without_extension + ".44100Hz.wav"),
+                        converted_file_path,
+                    )
                 else:
-                    print("Splitting: " + BASE_PATH)
-                    run()
-                    print("")
-    else:
-       run()
+                    subprocess.run(
+                        [
+                            "sox",
+                            copied_track,
+                            "--show-progress",
+                            "--no-dither",
+                            converted_file_path,
+                            "rate",
+                            "-v",
+                            "-a",
+                            "-I",
+                            "-s",
+                            "44100",
+                        ],
+                        check=True,
+            			stdout = subprocess.DEVNULL,
+            			stderr = subprocess.DEVNULL,
+                    )
+
+
+    def split_stems(self, copied_track, directory, filename, filename_extension, filename_without_extension, bit_depth):
+        if bit_depth == 24:
+            demucs.separate.main([
+                                "--int24",
+                                "-n",
+                                self.model_name,
+                                "--shifts",
+                                self.model_shifts,
+                                "-d",
+                                DEVICE,
+                                copied_track,
+                                "-o",
+                                f"{directory}/{filename_without_extension}"
+                ])
+        else:
+            demucs.separate.main([ "-n",
+                    self.model_name,
+                    "--shifts",
+                    self.model_shifts,
+                    "-d",
+                    DEVICE,
+                    copied_track,
+                    "-o",
+                    f"{directory}/{filename_without_extension}"])
+
+
+    def create_stem(self, directory, filename, filename_extension, filename_without_extension):
+        stems = [
+            f"{directory}/{filename_without_extension}/{self.model_name}/{filename_without_extension}/drums.wav",
+            f"{directory}/{filename_without_extension}/{self.model_name}/{filename_without_extension}/bass.wav",
+            f"{directory}/{filename_without_extension}/{self.model_name}/{filename_without_extension}/other.wav",
+            f"{directory}/{filename_without_extension}/{self.model_name}/{filename_without_extension}/vocals.wav",
+        ]
+        mixdown = f"{directory}/{filename_without_extension}/{filename_without_extension}.wav"
+        tags =  f"{directory}/{filename_without_extension}/tags.json"
+        metadata = {
+          "mastering_dsp": {
+            "compressor": {
+              "enabled": False,
+              "ratio": 3,
+              "output_gain": 0.5,
+              "release": 0.300000011920929,
+              "attack": 0.003000000026077032,
+              "input_gain": 0.5,
+              "threshold": 0,
+              "hp_cutoff": 300,
+              "dry_wet": 50
+            },
+            "limiter": {
+              "enabled": False,
+              "release": 0.05000000074505806,
+              "threshold": 0,
+              "ceiling": -0.3499999940395355
+            }
+          },
+          "version": 1,
+          "stems": [
+            {"color": "#009E73", "name": "Drums"},
+            {"color": "#D55E00", "name": "Bass"},
+            {"color": "#CC79A7", "name": "Other"},
+            {"color": "#56B4E9", "name": "Vox"}
+          ]
+        }
+        creator = StemCreator(mixdown, stems, "alac", metadata, tags)
+        creator.save()
+
+
+    def setup(self):
+        for package in self.required_packages:
+            if not shutil.which(package):
+                error = f"Please install {package} before running Stemgen."
+                if not (getattr(sys, 'frozen', False)):# and hasattr(sys, '_MEIPASS')):
+                    # only report if not in pyinstaller
+                    raise Exception(error)
+
+
+    def prepare(self, track:str, directory:str, filename:str, filename_extension:str, filename_without_extension:str):
+        if not os.path.exists(directory):
+            os.mkdir(directory)
+     
+        if filename_extension not in self.supported_files:
+            raise Exception("Invalid input file format. File should be one of:", self.supported_files)
+            
+        if not os.path.exists(f"{directory}/{filename_without_extension}"):
+            os.mkdir(f"{directory}/{filename_without_extension}")
+
+        copied_track = f"{directory}/{filename_without_extension}/{filename}"
+        shutil.copy(track, copied_track)
+
+        bit_depth = self.get_bit_depth(copied_track, filename_extension)
+        sample_rate = self.get_sample_rate(copied_track)
+        get_cover(filename_extension, track, directory, filename_without_extension)
+        get_metadata(track, directory, filename_without_extension)
+        self.convert(copied_track, directory, filename, filename_extension, filename_without_extension, bit_depth, sample_rate)
+        return copied_track, bit_depth
+
+
+    def get_bit_depth(self, file_path, filename_extension):
+        if filename_extension == ".flac":
+            return int(
+                subprocess.check_output(
+                    [
+                        "ffprobe",
+                        "-v",
+                        "error",
+                        "-select_streams",
+                        "a",
+                        "-show_entries",
+                        "stream=bits_per_raw_sample",
+                        "-of",
+                        "default=noprint_wrappers=1:nokey=1",
+                        file_path,
+                    ]
+                )
+            )
+        else:
+            return int(
+                subprocess.check_output(
+                    [
+                        "ffprobe",
+                        "-v",
+                        "error",
+                        "-select_streams",
+                        "a",
+                        "-show_entries",
+                        "stream=bits_per_sample",
+                        "-of",
+                        "default=noprint_wrappers=1:nokey=1",
+                        file_path,
+                    ]
+                )
+            )
+
+
+
+    def get_sample_rate(self, filepath):
+        return int(
+            subprocess.check_output(
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "a",
+                    "-show_entries",
+                    "stream=sample_rate",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    filepath,
+                ]
+            )
+        )
+
+
+    def clean_dir(self, directory, filename_without_extension):
+
+        #os.chdir(directory)
+
+        if os.path.isfile(os.path.join(directory, f"{filename_without_extension}.stem.m4a")):
+            os.remove(os.path.join(directory, f"{filename_without_extension}.stem.m4a"))
+
+        if os.path.isfile(os.path.join(directory, filename_without_extension, f"{filename_without_extension}.stem.m4a")):
+            os.rename(
+                os.path.join(directory, filename_without_extension, f"{filename_without_extension}.stem.m4a"),
+                os.path.join(directory, f"{filename_without_extension}.stem.m4a"),
+            )
+
+        try:
+            shutil.rmtree(os.path.join(directory, filename_without_extension))
+        except PermissionError:
+            raise Exception(
+                f"Permission error encountered. Directory {os.path.join(directory, filename_without_extension)} might still be in use."
+            )
+
+
+
+
+
+
+
