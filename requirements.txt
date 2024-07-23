@@ -1,6 +1,7 @@
 PyQt5==5.15.10
-PyQt5-Qt5==5.15.2
+PyQt5-Qt5==5.15.14
 #demucs
 #pyinstaller
 #mutagen
 pyinstaller
+cx_freeze

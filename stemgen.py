@@ -11,7 +11,7 @@ import demucs.separate
 from metadata import get_cover, get_metadata
 from tkinter import filedialog
 
-from nistem import StemCreator
+from ni_stem import StemCreator
 
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
 
