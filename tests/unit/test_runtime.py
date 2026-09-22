@@ -1,6 +1,5 @@
 """Headless tests for src/runtime.py — no Qt, no GPAC, no ffmpeg needed."""
 
-import os
 from pathlib import Path
 
 import pytest
@@ -32,7 +31,7 @@ def test_mp4box_path_dev_mode_points_into_repo():
 
 def test_augmented_path_appends_missing_macos_dirs():
     result = runtime.augmented_path("/usr/bin:/bin", system="Darwin")
-    parts = result.split(os.pathsep)
+    parts = result.split(":")  # macOS separator, whatever the host
     assert parts[:2] == ["/usr/bin", "/bin"]
     assert "/opt/homebrew/bin" in parts
     assert "/usr/local/bin" in parts
