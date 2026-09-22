@@ -156,10 +156,12 @@ try {
         # torch/bin must stay: torch.__init__ refuses to import without
         # bin/torch_shm_manager. include/ is header payload only.
         '--noinclude-data-files=torch/include/*'
-        # GPAC ships as a data dir with its layout intact so mp4box.exe finds
-        # its DLLs next to it. runtime.mp4box_path() resolves it relative to
-        # the launcher.
-        '--include-data-dir=GPAC_win=GPAC_win'
+        # GPAC ships with its layout intact so mp4box.exe finds its DLLs
+        # next to it; runtime.mp4box_path() resolves it relative to the
+        # launcher. --include-raw-dir, not --include-data-dir: Nuitka silently
+        # drops .exe/.dll files from a data dir, which left only the .txt
+        # files in the first Windows build.
+        '--include-raw-dir=GPAC_win=GPAC_win'
         '--include-data-files=LICENSE=LICENSE'
         "--output-dir=$Dist"
         '--remove-output'
