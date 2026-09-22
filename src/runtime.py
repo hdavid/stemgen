@@ -81,6 +81,8 @@ def augmented_path(env_path: str | None = None, system: str | None = None) -> st
     system = system or platform.system()
     if system != "Darwin":
         return env_path
-    present = env_path.split(os.pathsep) if env_path else []
+    # ":" is macOS's separator regardless of the host running this code
+    # (the unit tests exercise the Darwin branch from Windows too).
+    present = env_path.split(":") if env_path else []
     missing = [p for p in _MACOS_EXTRA_PATH if p not in present]
-    return os.pathsep.join(present + missing)
+    return ":".join(present + missing)
