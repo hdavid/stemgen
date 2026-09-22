@@ -1,0 +1,161 @@
+name: Build & Notarize (macOS)
+
+# Builds the signed + notarized .app/.dmg on a macOS runner.
+#   - push a tag like v0.1.0  → release build
+#   - or trigger manually from the Actions tab
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      where:
+        description: "Runner: auto = pick self-hosted if online (needs hosted minutes for the picker), self-hosted / hosted = force"
+        type: choice
+        options: [auto, self-hosted, hosted]
+        default: auto
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Route the build: self-hosted Mac when online, hosted otherwise ────────
+  # Listing self-hosted runners needs admin:read, which the default
+  # GITHUB_TOKEN can never be granted — so this uses the RUNNER_SCOUT_TOKEN
+  # secret (a PAT with repo access) and quietly falls back to the hosted
+  # runner when the secret is absent or the API call fails. A self-hosted
+  # build is minutes instead of hours: it reuses the machine's warm Nuitka
+  # ccache and uv cache.
+  pick-runner:
+    # Only used for a manual dispatch in 'auto' mode. Tag pushes (releases)
+    # and forced dispatches go straight to a runner without this hosted job,
+    # so they never depend on hosted minutes being available.
+    if: github.event_name == 'workflow_dispatch' && (inputs.where == 'auto' || inputs.where == '')
+    runs-on: ubuntu-latest
+    outputs:
+      labels: ${{ steps.pick.outputs.labels }}
+      selfhosted: ${{ steps.pick.outputs.selfhosted }}
+    steps:
+      - id: pick
+        env:
+          GH_TOKEN: ${{ secrets.RUNNER_SCOUT_TOKEN }}
+        run: |
+          labels='"macos-14"'; selfhosted=false
+          if [ -n "$GH_TOKEN" ]; then
+            online=$(gh api "repos/${{ github.repository }}/actions/runners" \
+              --jq '[.runners[] | select(.status == "online")
+                     | select([.labels[].name] | contains(["self-hosted", "macOS"]))] | length' \
+              2>/dev/null || echo 0)
+            if [ "${online:-0}" -gt 0 ]; then
+              labels='["self-hosted", "macOS"]'; selfhosted=true
+            fi
+          fi
+          echo "→ building on: $labels"
+          echo "labels=$labels" >> "$GITHUB_OUTPUT"
+          echo "selfhosted=$selfhosted" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: pick-runner
+    # Run when the picker succeeded OR was skipped by a forced dispatch.
+    if: ${{ !cancelled() && (needs.pick-runner.result == 'success' || needs.pick-runner.result == 'skipped') }}
+    # Release tag pushes build on the self-hosted Mac. If it is offline the
+    # job queues until it comes back (no hosted fallback without the picker).
+    runs-on: ${{ (github.event_name == 'push' || inputs.where == 'self-hosted') && fromJSON('["self-hosted", "macOS"]') || inputs.where == 'hosted' && 'macos-14' || fromJSON(needs.pick-runner.outputs.labels) }}
+    timeout-minutes: 180 # hosted cold-cache run: torch download + full Nuitka C compile
+    env:
+      SELFHOSTED: ${{ github.event_name == 'push' || inputs.where == 'self-hosted' || needs.pick-runner.outputs.selfhosted == 'true' }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true          # caches the uv download cache (torch wheels, …)
+
+      # Nuitka's cache dir holds the ccache C-object cache plus one-time tool
+      # downloads. The C compile dominates wall-clock on the 3-core M1 runner,
+      # so a warm ccache turns a >1 h compile into minutes. Keyed on the commit
+      # so every run saves an updated cache; restore-keys falls back to the
+      # most recent one. Skipped on a self-hosted Mac — its local ccache is
+      # already warm, and restoring a CI archive over it would only clobber
+      # newer entries.
+      - name: Cache Nuitka ccache
+        if: env.SELFHOSTED != 'true'
+        uses: actions/cache@v5
+        with:
+          path: ~/Library/Caches/Nuitka
+          key: nuitka-macos-${{ github.sha }}
+          restore-keys: nuitka-macos-
+
+      - name: Sync deps (runtime + build extra)
+        run: make venv
+
+      - name: Unit tests
+        run: make test
+
+      # ── Import the Developer ID Application cert into a temp keychain ────────
+      # The cert + private key live in MACOS_CERTIFICATE_P12 (base64 of a .p12).
+      # We create a throwaway keychain, import, and add it to the search list so
+      # `codesign --sign "$DEVELOPER_ID_APP"` can find the identity.
+      # Also required on a self-hosted Mac: the runner is a launchd service with
+      # no UI session, so codesign against the login keychain fails with
+      # errSecInternalComponent (it cannot show the authorization dialog). The
+      # temp keychain is password-authorized (set-key-partition-list), fully
+      # headless. It is prepended to the search list; the login keychain stays.
+      - name: Import signing certificate
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          CERT="$RUNNER_TEMP/cert.p12"
+          KEYCHAIN="$RUNNER_TEMP/app-signing.keychain-db"
+          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$CERT"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$CERT" -P "$MACOS_CERTIFICATE_PWD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychain -d user -s "$KEYCHAIN" login.keychain-db
+          rm -f "$CERT"
+
+      # ── Build → sign → notarize → staple, then package a .dmg ───────────────
+      # The Makefile/_build_app.sh read these straight from the environment.
+      - name: Build, sign, notarize & package
+        env:
+          DEVELOPER_ID_APP: ${{ secrets.DEVELOPER_ID_APP }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+        run: make dmg
+
+      # On a tag push, attach the .dmg to a GitHub Release first — this is the
+      # durable copy and must not be blocked by the transient CI artifact
+      # below (e.g. a stale Actions storage-quota reading).
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.dmg
+            dist/*.dmg.sha256
+
+      # Short-lived copy for non-tag runs / convenience. continue-on-error so
+      # a storage-quota hiccup here can never fail the job or block the
+      # release step above.
+      - name: Upload .dmg artifact
+        uses: actions/upload-artifact@v5
+        continue-on-error: true
+        with:
+          name: macos-dmg
+          path: |
+            dist/*.dmg
+            dist/*.dmg.sha256
+          if-no-files-found: error
+          retention-days: 1 # release assets (above) are the durable copy

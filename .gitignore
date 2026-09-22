@@ -1,34 +1,46 @@
-# General
-.DS_Store
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+*.egg
 
-# Thumbnails
-._*
+# Virtual environments
+venv/
+.venv/
+.uv-bootstrap/
 
-# Stemgen
+# Build output
+/build/
+/dist/
+/dist.lock/
+/dist-nuitka/
+*.spec
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.idea/
+
+# Project-local env (signing creds, app-specific passwords, …) — never commit
+.env.local
+
+# Stemgen working files
 input/*
 output/*
 metadata.part1.json
 metadata.part2.json
 
-# Spleeter
+# Spleeter / Demucs model caches (legacy locations)
 pretrained_models/*
-
-# Demucs
 demucs/*
 
 # Droplet
 stemgen-droplet.app
 
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
+# macOS
+.DS_Store
+._*
 
-# Python Egg
-*.egg-info/
-*.egg
-
-# Python dist and build
-dist/
-build/
-
-venv
+# Nuitka writes its crash report into the CWD, not dist/
+nuitka-crash-report.xml

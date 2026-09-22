@@ -1,0 +1,66 @@
+[project]
+name            = "stemgen"
+version         = "0.2.0"
+description     = "Turn any track into a Native Instruments .stem.m4a with Demucs."
+license         = "MIT"
+readme          = "README.md"
+# Pinned to 3.13 because Nuitka 4.0.x's support for 3.14 is still
+# experimental (it generates broken code for f-strings in some
+# site-packages). Bump to 3.14 once Nuitka catches up.
+requires-python = ">=3.13,<3.14"
+
+dependencies = [
+    "PyQt5>=5.15.10",
+    "mutagen>=1.47.0",
+    # Demucs pulls torch + torchaudio. The previous create_venv.sh forced
+    # numpy 1.x on top of them; that was a torch<2.3 wheel/ABI problem and
+    # torch>=2.6 wheels are built against numpy 2, so no pin is needed.
+    "demucs>=4.0.1",
+    "torch>=2.6.0",
+    "torchaudio>=2.6.0",
+    "numpy>=2.0",
+]
+
+[project.optional-dependencies]
+# Tools needed to ship a built .app / .exe — not required at runtime.
+# Activate with: uv sync --extra build
+build = [
+    "nuitka>=4.0",
+    "ordered-set",
+    "zstandard",
+    # Nuitka 4.x dropped its inline copy of markupsafe; the build
+    # aborts with "FATAL: Error, expected inline copy of 'markupsafe'"
+    # without it.
+    "markupsafe>=2.1",
+    # Styled .dmg (app + /Applications symlink + background) — see
+    # scripts/dmg_settings.py.
+    "dmgbuild>=1.6; sys_platform == 'darwin'",
+]
+# Dev-only — linting, formatting, testing.
+dev = [
+    "ruff>=0.5",
+    "pytest>=8.0",
+]
+
+[build-system]
+requires      = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# src/ holds flat modules, not a package — list them so `pip install .`
+# produces a wheel with code in it rather than metadata only.
+[tool.setuptools]
+package-dir = { "" = "src" }
+py-modules  = ["StemGenApp", "stemgen", "ni_stem", "metadata", "layout", "runtime"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths  = ["tests/unit"]
+
+[tool.ruff]
+line-length    = 100
+target-version = "py313"
+extend-exclude = ["venv", ".venv", "build", "dist", "dist-nuitka", "src/layout.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "PLC0415"]
+ignore = ["E501"]   # line length governed by formatter

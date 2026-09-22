@@ -1,0 +1,149 @@
+name: Build Windows MSI
+
+# Builds the Windows installer via `make package` (make.ps1 -> Nuitka -> WiX).
+# The only external inputs are uv (Python toolchain) and the dotnet SDK
+# (preinstalled on the runner; the package script installs the WiX global tool
+# itself).
+#
+# On a tag push (or a manual run with a tag) the MSI + its .sha256 are attached
+# to the GitHub Release for that tag. The macOS workflow attaches the .dmg to
+# the same release, so the two run independently and converge on one release.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to attach the MSI to (e.g. v0.1.0). Leave blank to only keep the build artifact.'
+        required: false
+        default: ''
+      where:
+        description: "Runner: auto = pick self-hosted if online (needs hosted minutes for the picker), self-hosted / hosted = force"
+        type: choice
+        options: [auto, self-hosted, hosted]
+        default: auto
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Route the build: self-hosted Windows PC when online, hosted otherwise ──
+  # Listing self-hosted runners needs admin:read, which the default
+  # GITHUB_TOKEN can never be granted — so this uses the RUNNER_SCOUT_TOKEN
+  # secret (a PAT with repo access) and quietly falls back to the hosted
+  # runner when the secret is absent or the API call fails. A self-hosted
+  # build is minutes instead of hours: it reuses the machine's warm Nuitka
+  # clcache and uv cache.
+  pick-runner:
+    # Only used for a manual dispatch in 'auto' mode. Tag pushes (releases)
+    # and forced dispatches go straight to a runner without this hosted job,
+    # so they never depend on hosted minutes being available.
+    if: github.event_name == 'workflow_dispatch' && (inputs.where == 'auto' || inputs.where == '')
+    runs-on: ubuntu-latest
+    outputs:
+      labels: ${{ steps.pick.outputs.labels }}
+      selfhosted: ${{ steps.pick.outputs.selfhosted }}
+    steps:
+      - id: pick
+        env:
+          GH_TOKEN: ${{ secrets.RUNNER_SCOUT_TOKEN }}
+        run: |
+          labels='"windows-latest"'; selfhosted=false
+          if [ -n "$GH_TOKEN" ]; then
+            online=$(gh api "repos/${{ github.repository }}/actions/runners" \
+              --jq '[.runners[] | select(.status == "online")
+                     | select([.labels[].name] | contains(["self-hosted", "Windows"]))] | length' \
+              2>/dev/null || echo 0)
+            if [ "${online:-0}" -gt 0 ]; then
+              labels='["self-hosted", "Windows"]'; selfhosted=true
+            fi
+          fi
+          echo "→ building on: $labels"
+          echo "labels=$labels" >> "$GITHUB_OUTPUT"
+          echo "selfhosted=$selfhosted" >> "$GITHUB_OUTPUT"
+
+  build-msi:
+    needs: pick-runner
+    # Run when the picker succeeded OR was skipped by a forced dispatch.
+    if: ${{ !cancelled() && (needs.pick-runner.result == 'success' || needs.pick-runner.result == 'skipped') }}
+    # Release tag pushes build on the self-hosted PC. If it is offline the
+    # job queues until it comes back (no hosted fallback without the picker).
+    runs-on: ${{ (github.event_name == 'push' || inputs.where == 'self-hosted') && fromJSON('["self-hosted", "Windows"]') || inputs.where == 'hosted' && 'windows-latest' || fromJSON(needs.pick-runner.outputs.labels) }}
+    env:
+      SELFHOSTED: ${{ github.event_name == 'push' || inputs.where == 'self-hosted' || needs.pick-runner.outputs.selfhosted == 'true' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      # Nuitka's cache dir holds the clcache C-object cache plus one-time tool
+      # downloads (depends.exe). The MSVC compile of ~150 generated C files
+      # dominates the build, so a warm clcache cuts hours off re-runs. Keyed on
+      # the commit so every run saves an updated cache; restore-keys falls back
+      # to the most recent one. Skipped on a self-hosted PC — its local clcache
+      # is already warm, and restoring a CI archive over it would only clobber
+      # newer entries.
+      - name: Cache Nuitka clcache
+        if: env.SELFHOSTED != 'true'
+        uses: actions/cache@v5
+        with:
+          path: ~\AppData\Local\Nuitka\Nuitka\Cache
+          key: nuitka-windows-${{ github.sha }}
+          restore-keys: nuitka-windows-
+
+      - name: Unit tests
+        shell: pwsh
+        run: ./make.ps1 test
+
+      - name: Build MSI (make package)
+        shell: pwsh
+        run: ./make.ps1 package
+
+      - name: Locate artefacts
+        id: artefacts
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem dist -Filter 'StemGenSetup*.msi' |
+                 Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $msi) { throw "no MSI produced under dist/" }
+          "msi=$($msi.FullName)"        >> $env:GITHUB_OUTPUT
+          "sha=$($msi.FullName).sha256" >> $env:GITHUB_OUTPUT
+
+      # Attach to the Release first — this is the durable copy and must not
+      # be blocked by the transient CI artifact below (e.g. a stale Actions
+      # storage-quota reading).
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = if ($env:GITHUB_REF -like 'refs/tags/*') {
+            $env:GITHUB_REF -replace '^refs/tags/', ''
+          } else { '${{ inputs.tag }}' }
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title $tag --generate-notes
+          }
+          gh release upload $tag '${{ steps.artefacts.outputs.msi }}' '${{ steps.artefacts.outputs.sha }}' --clobber
+
+      # Short-lived copy for non-tag runs / convenience. continue-on-error so
+      # a storage-quota hiccup here can never fail the job or block the
+      # release step above.
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v5
+        continue-on-error: true
+        with:
+          name: windows-msi
+          path: |
+            dist/StemGenSetup*.msi
+            dist/StemGenSetup*.msi.sha256
+          if-no-files-found: error
+          retention-days: 1 # release assets (above) are the durable copy

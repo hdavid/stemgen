@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 
-import os
-import sys
-import subprocess
 import json
+import os
+import subprocess
+import sys
 
 sys.path.append(os.path.abspath("ni-stem/mutagen"))
 import mutagen

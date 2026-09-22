@@ -1,14 +1,17 @@
+import base64
 import codecs
 import json
-import base64
-import mutagen
-import mutagen.mp4
-import mutagen.id3
 import os
 import platform
+import re
 import subprocess
 import sys
-import re
+
+import mutagen
+import mutagen.id3
+import mutagen.mp4
+
+from runtime import mp4box_path
 
 stemDescription = "stem-meta"
 stemOutExtension = ".m4a"
@@ -27,15 +30,6 @@ def _removeFile(path):
             os.remove(path)
         else:
             raise RuntimeError("Cannot remove " + path + ": not a file")
-
-
-def _getProgramPath():
-    folderPath = os.path.dirname(os.path.realpath(__file__))
-    if os.path.isfile(folderPath):
-        # When packaging the script with py2exe, os.path.realpath returns the path to the object file within
-        # the .exe, so we have to apply os.path.dirname() one more time
-        folderPath = os.path.dirname(folderPath)
-    return folderPath
 
 
 def _findCmd(cmd):
@@ -232,13 +226,10 @@ class StemCreator:
         outputFilePath = "".join([root, stemOutExtension])
         _removeFile(outputFilePath)
         
-        folderName = "GPAC_win" if _windows else "GPAC_mac" if _macos else "GPAC_linux"
-        executable = "mp4box.exe" if _windows else "mp4box" if _macos else "MP4Box"
-        if (getattr(sys, 'frozen', False)):# and hasattr(sys, '_MEIPASS')):
-            # no folder for mp4box when running in pyinstaller
-            mp4box = os.path.join(_getProgramPath(), executable)
-        else:
-            mp4box = os.path.join(_getProgramPath(), folderName, executable)
+        # Resolved through runtime.mp4box_path so the same code finds the
+        # bundled GPAC folder from source, from a PyInstaller bundle and from
+        # the Nuitka .app (see scripts/_build_app.sh).
+        mp4box = str(mp4box_path())
 
         sys.stdout.flush()
 
@@ -468,11 +459,7 @@ class StemMetadataViewer:
         self._metadata = {}
 
         if stemFile:
-            folderName = (
-                "GPAC_win" if _windows else "GPAC_mac" if _macos else "GPAC_linux"
-            )
-            executable = "mp4box.exe" if _windows else "mp4box" if _macos else "MP4Box"
-            mp4box = os.path.join(_getProgramPath(), folderName, executable)
+            mp4box = str(mp4box_path())
 
             callArgs = [mp4box]
             callArgs.extend(["-dump-udta", "0:stem", stemFile])

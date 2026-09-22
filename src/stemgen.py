@@ -1,24 +1,18 @@
-import argparse
 import os
 import shutil
-import sys
 import subprocess
-from pathlib import Path
-import unicodedata
 import traceback
-import torch
-import demucs.separate
-from metadata import get_cover, get_metadata
-from tkinter import filedialog
 
+import demucs.separate
+import torch
+from PyQt5.QtCore import QObject, pyqtSignal
+
+from metadata import get_cover, get_metadata
 from ni_stem import StemCreator
 
-from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
-
-
 DEVICE = (
-    ("cuda" if torch.cuda.is_available() else (
-    "mps" if torch.backends.mps.is_available() else "cpu"))
+    "cuda" if torch.cuda.is_available() else (
+    "mps" if torch.backends.mps.is_available() else "cpu")
 )
 
 class StemGen(QObject):
@@ -27,7 +21,7 @@ class StemGen(QObject):
     details_update = pyqtSignal(str)
     
     def __init__(self):
-        super(StemGen, self).__init__()
+        super().__init__()
         
         self.supported_files = [".wave", ".wav", ".aiff", ".aif", ".flac", ".mp3"]
         self.required_packages = ["ffmpeg", "sox"]
@@ -133,8 +127,8 @@ class StemGen(QObject):
         self.details_update.emit(details)
             
         
-    def emit_error(self, error:str):
-        self.errors.append(error)
+    def emit_error(self, error):
+        self.errors.append(str(error))
         self.details_update.emit(', '.join(str(x) for x in self.errors)  )
     
     
@@ -156,6 +150,10 @@ class StemGen(QObject):
 
 
         converted_file_path = os.path.join(directory, filename_without_extension, filename_without_extension + ".wav")
+        # Compare normalised paths so a stray "//" can never turn an in-place
+        # conversion into a sox call with input == output.
+        copied_track = os.path.normpath(copied_track)
+        converted_file_path = os.path.normpath(converted_file_path)
 
         if bit_depth == 32:
             # Downconvert to 24-bit
@@ -327,12 +325,17 @@ class StemGen(QObject):
 
 
     def setup(self):
-        for package in self.required_packages:
-            if not shutil.which(package):
-                error = f"Please install {package} before running Stemgen."
-                if not (getattr(sys, 'frozen', False)):# and hasattr(sys, '_MEIPASS')):
-                    # only report if not in pyinstaller
-                    raise Exception(error)
+        # The built app used to skip this check because a Finder-launched
+        # bundle never saw the Homebrew PATH. StemGenApp now extends PATH at
+        # startup (runtime.augmented_path), so the check is meaningful there
+        # too — failing here is far clearer than a FileNotFoundError from
+        # subprocess halfway through a track.
+        missing = [package for package in self.required_packages if not shutil.which(package)]
+        if missing:
+            raise Exception(
+                "Please install " + " and ".join(missing) + " before running Stemgen"
+                " (macOS: brew install " + " ".join(missing) + ")."
+            )
 
 
     def prepare(self, track:str, directory:str, filename:str, filename_extension:str, filename_without_extension:str):
@@ -345,7 +348,11 @@ class StemGen(QObject):
         if not os.path.exists(f"{directory}/{filename_without_extension}"):
             os.mkdir(f"{directory}/{filename_without_extension}")
 
-        copied_track = f"{directory}/{filename_without_extension}/{filename}"
+        # os.path.join, not an f-string: `directory` already ends with "/" and
+        # the doubled slash used to make convert() think copied_track and its
+        # own output path were different files — sox then wrote in place and
+        # truncated the track to an empty WAV.
+        copied_track = os.path.join(directory, filename_without_extension, filename)
         shutil.copy(track, copied_track)
 
         bit_depth = self.get_bit_depth(copied_track, filename_extension)

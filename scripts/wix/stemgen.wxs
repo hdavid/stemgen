@@ -1,0 +1,222 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  StemGen Windows Installer — WiX Toolset v7
+  https://wixtoolset.org
+
+  Single self-contained MSI: contains the full Nuitka standalone build
+  (StemGenApp.exe + bundled deps + GPAC),
+  harvested from dist\StemGenApp.dist\. No Burn bootstrapper — the
+  product fits comfortably under the MSI cabinet limit.
+
+  Prerequisites (run once on the build machine; package script auto-installs):
+    dotnet tool install -g wix
+    wix extension add WixToolset.UI.wixext   -g
+    wix extension add WixToolset.Util.wixext -g
+
+  Build (runs the Nuitka standalone build, then WiX):
+    make package          (timestamped)
+    powershell scripts/_package_windows.ps1    (stable name)
+
+  !! IMPORTANT !!
+  UpgradeCode must NEVER change across releases — it is the stable identity of
+  this product. If you fork this project, generate a new GUID once and replace
+  the value below.
+
+
+  Installation layout:
+    C:\Program Files\StemGen\      <- INSTALLFOLDER (binaries, read-only)
+      StemGenApp.exe                   <- main executable
+      <bundled deps, GPAC_win\, demucs\>
+  Demucs model weights are downloaded on first run into the user's torch
+  cache (%USERPROFILE%\.cache\torch), never installed here.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <!--
+    Product version — injected by _package_windows.ps1 as a monotonic
+    `1.0.<days-since-2020-01-01>` build number via `-d Version=…`. MSI's
+    MajorUpgrade only removes a previously-installed product whose version is
+    strictly lower, so a CONSTANT version would leave every build registered as
+    a separate product (Add/Remove Programs accumulates one entry per install).
+    The fallback below keeps a bare `wix build` (no -d) working for quick .wxs
+    iteration.
+  -->
+  <?ifndef Version ?>
+  <?define Version = 1.0.0 ?>
+  <?endif ?>
+
+  <Package
+    Name="StemGen"
+    Manufacturer="StemGen"
+    Version="$(Version)"
+    UpgradeCode="{0A3450E2-8392-4F52-8E23-23A9E3C54B15}"
+    Scope="perMachine"
+    InstallerVersion="500">
+
+    <!--
+      Upgrade policy — remove the old version before installing the new one
+      (prevents file conflicts), block downgrades with a clear message.
+    -->
+    <MajorUpgrade
+      Schedule="afterInstallInitialize"
+      AllowSameVersionUpgrades="yes"
+      DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+
+    <!-- Embed everything into a single compressed cabinet inside the MSI. -->
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!--
+      Standard wizard: license page → directory chooser → install. A familiar
+      Next/Next/Install flow with no bootstrapper EXE wrapping the MSI.
+    -->
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="license.rtf" />
+
+    <!--
+      INSTALLFOLDER is Secure so it can be set on the command line for silent
+      installs (msiexec /i …\StemGenSetup.msi INSTALLFOLDER="…")
+      without losing it during the elevation hand-off. The WIXUI_INSTALLDIR
+      property is created automatically by the <ui:WixUI> element above.
+    -->
+    <Property Id="INSTALLFOLDER" Secure="yes" />
+
+    <!--
+      Add/Remove Programs entry — Icon Id MUST end in `.ico` to match the
+      SourceFile extension (MSI's Icon table keys files by full name including
+      extension; otherwise Windows falls back to the generic Installer icon).
+    -->
+    <Icon Id="AppIcon.ico" SourceFile="..\..\assets\icons\StemGen.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+    <Property Id="ARPCOMMENTS"    Value="StemGen — Turn any track into a Native Instruments .stem.m4a." />
+
+    <!-- ================================================================
+         Running-app guard. If StemGenApp.exe is running when the
+         installer starts, close it cleanly (WM_CLOSE) before any file is
+         touched, or abort the transaction (interactive). Avoids the MSI
+         "Files in Use" dialog / pending-rename reboot path. All files live
+         under INSTALLFOLDER, so no reboot prompt is needed.
+         ================================================================ -->
+    <util:CloseApplication
+      Id="CloseStemGen"
+      Target="StemGenApp.exe"
+      Description="StemGen must be closed before the installer can continue."
+      CloseMessage="yes"
+      ElevatedCloseMessage="yes"
+      RebootPrompt="no"
+      EndSessionMessage="yes"
+      PromptToContinue="yes" />
+
+    <!-- ================================================================
+         Directory layout
+         ================================================================ -->
+
+    <!-- Binaries -> C:\Program Files\StemGen\ (64-bit). -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="StemGen" />
+    </StandardDirectory>
+
+    <!-- Shortcuts -->
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="StartMenuDir" Name="StemGen" />
+    </StandardDirectory>
+    <StandardDirectory Id="DesktopFolder" />
+
+    <!-- ================================================================
+         Features
+         ================================================================ -->
+    <Feature Id="Complete" Title="StemGen" Level="1">
+      <ComponentGroupRef Id="MainBinary" />
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentGroupRef Id="Shortcuts" />
+      <ComponentGroupRef Id="InstallPathRegistry" />
+    </Feature>
+
+    <!-- ================================================================
+         Main executable — held in its own component so the shortcut targets
+         can reference it by ID.
+         ================================================================ -->
+    <ComponentGroup Id="MainBinary" Directory="INSTALLFOLDER">
+      <Component Id="MainExeComp">
+        <File Id="MainExe"
+              Source="..\..\dist\StemGenApp.dist\StemGenApp.exe"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!--
+      All remaining files in the standalone bundle, auto-harvested. The main
+      exe is excluded because it has its own Component above (otherwise WiX
+      duplicates the file-table row and refuses to build). Standard MSI
+      uninstall removes every harvested file and its now-empty directories.
+    -->
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="..\..\dist\StemGenApp.dist\**\*">
+        <Exclude Files="..\..\dist\StemGenApp.dist\StemGenApp.exe" />
+      </Files>
+    </ComponentGroup>
+
+    <!-- ================================================================
+         Shortcuts — Start Menu (with Uninstall entry) + Desktop. Each
+         component carries its own HKCU KeyPath so MSI tracks install state
+         per user without using the binary's KeyPath.
+         ================================================================ -->
+    <ComponentGroup Id="Shortcuts">
+
+      <Component Id="StartMenuComp" Directory="StartMenuDir">
+        <Shortcut Id="StartMenuStemGen"
+                  Name="StemGen"
+                  Description="Turn any track into a Native Instruments .stem.m4a"
+                  Target="[INSTALLFOLDER]StemGenApp.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon.ico" />
+        <Shortcut Id="StartMenuUninstall"
+                  Name="Uninstall StemGen"
+                  Description="Removes StemGen from this computer"
+                  Target="[SystemFolder]msiexec.exe"
+                  Arguments="/x [ProductCode]" />
+        <RemoveFolder Id="RemoveStartMenuDir"
+                      Directory="StartMenuDir"
+                      On="uninstall" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\StemGen"
+                       Name="StartMenu"
+                       Type="integer" Value="1"
+                       KeyPath="yes" />
+      </Component>
+
+      <Component Id="DesktopComp" Directory="DesktopFolder">
+        <Shortcut Id="DesktopStemGen"
+                  Name="StemGen"
+                  Description="Turn any track into a Native Instruments .stem.m4a"
+                  Target="[INSTALLFOLDER]StemGenApp.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon.ico" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\StemGen"
+                       Name="Desktop"
+                       Type="integer" Value="1"
+                       KeyPath="yes" />
+      </Component>
+
+    </ComponentGroup>
+
+    <!-- ================================================================
+         Install-path registry record — lets a future installer revision
+         locate the install folder. NOT removed on uninstall so a re-install
+         can re-discover the chosen path.
+         ================================================================ -->
+    <ComponentGroup Id="InstallPathRegistry" Directory="INSTALLFOLDER">
+      <Component Id="InstallPathComp">
+        <RegistryValue Root="HKLM"
+                       Key="Software\StemGen"
+                       Name="InstallPath"
+                       Type="string"
+                       Value="[INSTALLFOLDER]"
+                       KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+  </Package>
+</Wix>

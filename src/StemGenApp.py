@@ -2,17 +2,21 @@
 # Main
 # if __name__ == '__main__':from PyQt5.uic import loadUi
 
-from PyQt5.QtWidgets import QMainWindow, QApplication, QFileDialog
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, pyqtSlot
-from PyQt5.QtGui import  QCursor
-from layout import Ui_MainWindow
-
-import sys
 import os
-import platform
-import string
-import re
+import sys
 import traceback
+
+from PyQt5.QtCore import Qt, QThread, pyqtSlot
+from PyQt5.QtGui import QCursor
+from PyQt5.QtWidgets import QApplication, QFileDialog, QMainWindow
+
+from layout import Ui_MainWindow
+from runtime import augmented_path
+
+# Must run before `stemgen` is imported: torch probes the environment at
+# import time and StemGen.setup() looks ffmpeg/sox up on PATH. A bundle
+# launched from Finder gets launchd's PATH, which has no Homebrew in it.
+os.environ["PATH"] = augmented_path()
 
 from stemgen import StemGen
 
@@ -32,7 +36,7 @@ class StemThread(QThread):
 class MainWindow(QMainWindow, Ui_MainWindow):
 
     def __init__(self):
-        super(MainWindow, self).__init__()
+        super().__init__()
         self.stem_thread = None
         
         self.setupUi(self)
@@ -42,9 +46,14 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         
     @pyqtSlot()
     def start(self):
-        options = QFileDialog.Options()
-        options |= QFileDialog.DontUseNativeDialog
-        tracks, _ = QFileDialog.getOpenFileNames(self,"QFileDialog.getOpenFileNames()", "","All Files (*)", options=options)
+        # Native OS file picker (Finder sheet / Explorer dialog), filtered to
+        # the formats the pipeline accepts — see StemGen.supported_files.
+        tracks, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Select tracks to convert to stems",
+            "",
+            "Audio files (*.wav *.wave *.aif *.aiff *.flac *.mp3);;All files (*)",
+        )
         if tracks:
             try:
                 if self.stem_thread is not None:
@@ -106,9 +115,14 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 # Main
 if __name__ == '__main__':
     import multiprocessing
-    
-    multiprocessing.freeze_support()
+
+    # Order matters on Python >= 3.13: freeze_support() resolves the default
+    # context, after which set_start_method() raises "context has already
+    # been set". Pick spawn first (so Linux matches macOS/Windows and the
+    # frozen build never forks a Qt process), then let freeze_support() do
+    # its Windows-bundle dance.
     multiprocessing.set_start_method('spawn')
+    multiprocessing.freeze_support()
     
     app = QApplication(sys.argv)
     Screen = MainWindow()

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Python (and Nuitka's compiled C extensions) generate executable
+         pages at import time; the hardened runtime would otherwise refuse. -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+
+    <!-- torch (and its MPS/Accelerate kernels) rely on JIT-compiled code paths. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+
+    <!-- torch, Qt and GPAC dylibs are signed with our team
+         identity, but library-validation would still reject any whose
+         designated requirement differs (e.g. Apple-shipped libs loaded
+         from a non-system path). -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+
+    <!-- Lets the Nuitka launcher pass DYLD_* hints to its child Python
+         process; harmless but required by some plugin combinations. -->
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+</dict>
+</plist>
