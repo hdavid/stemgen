@@ -1,14 +1,13 @@
 #!/usr/bin/python3
 # Main
-# if __name__ == '__main__':from PyQt5.uic import loadUi
 
 import os
 import sys
 import traceback
 
-from PyQt5.QtCore import Qt, QThread, pyqtSlot
-from PyQt5.QtGui import QCursor
-from PyQt5.QtWidgets import QApplication, QFileDialog, QMainWindow
+from PySide6.QtCore import Qt, QThread, Slot
+from PySide6.QtGui import QCursor
+from PySide6.QtWidgets import QApplication, QFileDialog, QMainWindow
 
 from layout import Ui_MainWindow
 from runtime import augmented_path
@@ -38,13 +37,14 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     def __init__(self):
         super().__init__()
         self.stem_thread = None
+        self.m_drag = False
         
         self.setupUi(self)
 
         self.start_button.pressed.connect(self.start)
         self.close.clicked.connect(self.exitprogram)
         
-    @pyqtSlot()
+    @Slot()
     def start(self):
         # Native OS file picker (Finder sheet / Explorer dialog), filtered to
         # the formats the pipeline accepts — see StemGen.supported_files.
@@ -74,15 +74,15 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.stem_thread.deleteLater()  # Clean up the thread properly
         self.stem_thread = None
 
-    @pyqtSlot(str)
+    @Slot(str)
     def details_update(self, details):
         self.details.setText(details)
 
-    @pyqtSlot(str)
+    @Slot(str)
     def update_song_processing(self, song_name):
         self.song_name.setText(song_name)
 
-    @pyqtSlot(str, int, int, int, int)
+    @Slot(str, int, int, int, int)
     def update_counters(self, status, total, downloaded, skipped, failed):
         if skipped != 0 or failed != 0:
             self.counter_label.setText(status+":\t" + str(downloaded+skipped+failed) + "/" + str(total)  + "\tprocessed:" + str(downloaded) + "\tskipped: " + str(skipped) + "\tfailed:" + str(failed))
@@ -95,13 +95,13 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.m_drag = True
-            self.m_DragPosition = event.globalPos() - self.pos()
+            self.m_DragPosition = event.globalPosition().toPoint() - self.pos()
             event.accept()
             self.setCursor(QCursor(Qt.ClosedHandCursor))
 
     def mouseMoveEvent(self, QMouseEvent):
-        if Qt.LeftButton and self.m_drag:
-            self.move(QMouseEvent.globalPos() - self.m_DragPosition)
+        if self.m_drag:
+            self.move(QMouseEvent.globalPosition().toPoint() - self.m_DragPosition)
             QMouseEvent.accept()
 
     def mouseReleaseEvent(self, QMouseEvent):

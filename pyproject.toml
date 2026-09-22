@@ -10,7 +10,7 @@ readme          = "README.md"
 requires-python = ">=3.13,<3.14"
 
 dependencies = [
-    "PyQt5>=5.15.10",
+    "PySide6>=6.6.0",
     "mutagen>=1.47.0",
     # Demucs pulls torch + torchaudio. The previous create_venv.sh forced
     # numpy 1.x on top of them; that was a torch<2.3 wheel/ABI problem and

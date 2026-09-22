@@ -5,7 +5,7 @@ import traceback
 
 import demucs.separate
 import torch
-from PyQt5.QtCore import QObject, pyqtSignal
+from PySide6.QtCore import QObject, Signal
 
 from metadata import get_cover, get_metadata
 from ni_stem import StemCreator
@@ -16,9 +16,9 @@ DEVICE = (
 )
 
 class StemGen(QObject):
-    song_processing = pyqtSignal(str)
-    counts = pyqtSignal(str, int, int, int, int)
-    details_update = pyqtSignal(str)
+    song_processing = Signal(str)
+    counts = Signal(str, int, int, int, int)
+    details_update = Signal(str)
     
     def __init__(self):
         super().__init__()

@@ -467,9 +467,11 @@ class StemMetadataViewer:
 
             root, ext = os.path.splitext(stemFile)
             udtaFile = root + "_stem.udta"
-            fileObj = codecs.open(udtaFile, encoding="utf-8")
-            fileObj.seek(8)
-            self._metadata = json.load(fileObj)
+            # GPAC < 2 dumped the box with its 8-byte header in front; GPAC 26
+            # (the bundled build) dumps the bare payload. Skip to the JSON.
+            with open(udtaFile, "rb") as fileObj:
+                raw = fileObj.read()
+            self._metadata = json.loads(raw[raw.index(b"{"):].decode("utf-8"))
             os.remove(udtaFile)
 
     def dump(self, metadataFile=None, reportFile=None):

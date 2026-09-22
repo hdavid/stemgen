@@ -44,3 +44,6 @@ stemgen-droplet.app
 
 # Nuitka writes its crash report into the CWD, not dist/
 nuitka-crash-report.xml
+
+# setuptools build metadata (uv build / pip install .)
+*.egg-info/
