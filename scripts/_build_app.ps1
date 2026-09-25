@@ -98,6 +98,10 @@ try {
         '--include-package=einops'
         '--include-package=lameenc'
         '--include-package=mutagen'
+        # torch.load imports these by name while unpickling the htdemucs
+        # checkpoint (numpy.core = numpy 2's compat shim). See _build_app.sh.
+        '--include-module=numpy.core.multiarray'
+        '--include-module=fractions'
         # demucs never calls torch.jit; make Nuitka's standalone default
         # explicit so the options-nanny plugin stops asking.
         '--module-parameter=torch-disable-jit=yes'
@@ -162,6 +166,10 @@ try {
         # drops .exe/.dll files from a data dir, which left only the .txt
         # files in the first Windows build.
         '--include-raw-dir=GPAC_win=GPAC_win'
+        # Static ffmpeg / ffprobe / sox (scripts/build_audio_tools.sh win);
+        # runtime.augmented_path() puts this folder first on PATH. Raw dir
+        # for the same .exe-dropping reason as GPAC_win.
+        '--include-raw-dir=AUDIO_win=AUDIO_win'
         '--include-data-files=LICENSE=LICENSE'
         "--output-dir=$Dist"
         '--remove-output'

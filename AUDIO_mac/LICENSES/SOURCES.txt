@@ -1,0 +1,12 @@
+Built by scripts/build_audio_tools.sh (mac) from these unmodified sources
+(libmad additionally gets the CMake 4 backport listed below):
+
+ffmpeg 9.0.2   https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz
+               sha256 8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e   (LGPL-2.1; configured without --enable-gpl)
+sox 14.4.2     https://downloads.sourceforge.net/project/sox/sox/14.4.2/sox-14.4.2.tar.gz
+               sha256 b45f598643ffbd8e363ff24d61166ccec4836fea6d3888881b8df53e3bb55f6c   (GPL-2.0)
+libmad 0.16.4  https://codeberg.org/tenacityteam/libmad/releases/download/0.16.4/libmad-0.16.4.tar.gz
+               sha256 0f6bfb36c554075494b5fc2c646d08de7364819540f23bab30ae73fa1b5cfe65   (GPL-2.0)
+               patch https://codeberg.org/tenacityteam/libmad/commit/326363f04e583b563f63941db3cf7f50e76aceb2.diff
+libFLAC 1.5.0  https://downloads.xiph.org/releases/flac/flac-1.5.0.tar.xz
+               sha256 f2c1c76592a82ffff8413ba3c4a1299b6c7ab06c734dee03fd88630485c2b920   (BSD-3-Clause)

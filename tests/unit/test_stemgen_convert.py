@@ -71,3 +71,18 @@ def test_emit_error_stores_strings():
     # print_report joins errors into the details text — must not TypeError.
     sg.failed_tracks.append("x")
     sg.print_report()
+
+
+def test_report_lists_failed_tracks_under_failed_heading():
+    # Failed tracks used to be printed under "Processed Tracks:", so a run
+    # where everything failed read as if everything had succeeded.
+    gen = stemgen.StemGen()
+    details = []
+    gen.details_update.connect(details.append)
+    gen.failed_tracks = ["bad one"]
+    gen.processed_tracks = ["good one"]
+    gen.print_report()
+    report = details[-1]
+    assert "Failed Tracks:\n\tbad one" in report
+    assert "Processed Tracks:\n\tgood one" in report
+    assert "Processed Tracks:\n\tbad one" not in report

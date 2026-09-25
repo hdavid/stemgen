@@ -24,7 +24,7 @@ class StemGen(QObject):
         super().__init__()
         
         self.supported_files = [".wave", ".wav", ".aiff", ".aif", ".flac", ".mp3"]
-        self.required_packages = ["ffmpeg", "sox"]
+        self.required_packages = ["ffmpeg", "ffprobe", "sox"]
         
         self.model_name = "htdemucs"
         self.model_shifts = "1"
@@ -108,7 +108,7 @@ class StemGen(QObject):
         details = ""
         
         if self.failed_track_count>0:
-            details += "Processed Tracks:"
+            details += "Failed Tracks:"
             for track in self.failed_tracks:
                 details += "\n\t" + track
             details +="\n"
@@ -325,10 +325,10 @@ class StemGen(QObject):
 
 
     def setup(self):
-        # The built app used to skip this check because a Finder-launched
-        # bundle never saw the Homebrew PATH. StemGenApp now extends PATH at
-        # startup (runtime.augmented_path), so the check is meaningful there
-        # too — failing here is far clearer than a FileNotFoundError from
+        # The built app ships ffmpeg / ffprobe / sox (AUDIO_mac / AUDIO_win)
+        # and StemGenApp puts that folder first on PATH at startup
+        # (runtime.augmented_path), so this only fires from source on a
+        # machine without them — far clearer than a FileNotFoundError from
         # subprocess halfway through a track.
         missing = [package for package in self.required_packages if not shutil.which(package)]
         if missing:

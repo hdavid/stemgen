@@ -122,6 +122,13 @@ NUITKA_FLAGS=(
     --include-package=einops
     --include-package=lameenc
     --include-package=mutagen
+    # torch.load imports these by name while unpickling the htdemucs
+    # checkpoint; nothing imports them statically. numpy.core is numpy 2's
+    # compatibility shim — without it every track fails with
+    # "No module named 'numpy.core.multiarray'". Guarded by
+    # tests/unit/test_build_scripts.py.
+    --include-module=numpy.core.multiarray
+    --include-module=fractions
     # demucs never calls torch.jit; make Nuitka's standalone default explicit
     # so the options-nanny plugin stops asking.
     --module-parameter=torch-disable-jit=yes
@@ -187,6 +194,9 @@ NUITKA_FLAGS=(
     # GPAC_mac/ and assets/ would otherwise ship inside the bundle.
     '--noinclude-data-files=*.DS_Store'
     --include-data-dir=GPAC_mac=GPAC_mac
+    # Static ffmpeg / ffprobe / sox (scripts/build_audio_tools.sh);
+    # runtime.augmented_path() puts this folder first on PATH.
+    --include-data-dir=AUDIO_mac=AUDIO_mac
     --include-data-files=LICENSE=LICENSE
     --output-dir="$DIST"
     --remove-output
@@ -217,6 +227,11 @@ echo "▶ stripping debug symbols"
 # GPAC's mp4box must stay executable after the data-dir copy, or the stem
 # muxing step fails silently (ni_stem swallows the subprocess output).
 /bin/chmod +x "$BUNDLE/Contents/MacOS/GPAC_mac/mp4box"
+# Same for the audio tools: a non-executable ffmpeg/sox makes shutil.which
+# skip them and the app falls back to (or fails without) system copies.
+/bin/chmod +x "$BUNDLE/Contents/MacOS/AUDIO_mac/ffmpeg" \
+    "$BUNDLE/Contents/MacOS/AUDIO_mac/ffprobe" \
+    "$BUNDLE/Contents/MacOS/AUDIO_mac/sox"
 
 # ── Codesign ────────────────────────────────────────────────────────────────
 # If DEVELOPER_ID_APP is set we do a real Developer-ID sign with the hardened

@@ -20,8 +20,14 @@ from pathlib import Path
 _GPAC_FOLDER = {"Windows": "GPAC_win", "Darwin": "GPAC_mac"}
 _MP4BOX_EXE = {"Windows": "mp4box.exe", "Darwin": "mp4box"}
 
-# GUI apps launched from Finder inherit launchd's PATH, not the shell's, so
-# Homebrew/MacPorts tools (ffmpeg, sox) are invisible unless added here.
+# Static ffmpeg / ffprobe / sox built by scripts/build_audio_tools.sh, copied
+# verbatim into the bundle next to the GPAC folder. No Linux build: from
+# source on Linux the system tools are used.
+_AUDIO_FOLDER = {"Windows": "AUDIO_win", "Darwin": "AUDIO_mac"}
+
+# Fallback for running from source on macOS without the bundled tools: GUI
+# apps launched from Finder inherit launchd's PATH, not the shell's, so
+# Homebrew/MacPorts tools are invisible unless added here.
 _MACOS_EXTRA_PATH = ("/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin")
 
 
@@ -70,19 +76,36 @@ def mp4box_path(system: str | None = None, data_dir: Path | None = None) -> Path
     return data_dir / folder / exe
 
 
-def augmented_path(env_path: str | None = None, system: str | None = None) -> str:
-    """``PATH`` with the usual macOS package-manager bin dirs appended.
+def audio_tools_dir(system: str | None = None, data_dir: Path | None = None) -> Path | None:
+    """Folder holding the bundled ffmpeg / ffprobe / sox, or ``None`` (Linux)."""
+    system = system or platform.system()
+    folder = _AUDIO_FOLDER.get(system)
+    if folder is None:
+        return None
+    return (data_dir or bundle_data_dir()) / folder
 
-    Returns a new string — the caller decides whether to write it back to
-    ``os.environ``. Entries already present are not duplicated; other
-    platforms get their ``PATH`` back untouched.
+
+def augmented_path(
+    env_path: str | None = None,
+    system: str | None = None,
+    data_dir: Path | None = None,
+) -> str:
+    """``PATH`` with the bundled audio tools first (and Homebrew dirs last on macOS).
+
+    The bundled folder goes first so our known-good ffmpeg / sox win over
+    whatever the user has installed — demucs calls ``ffmpeg`` by bare name,
+    so ``PATH`` is the only way to point it at ours. Returns a new string —
+    the caller decides whether to write it back to ``os.environ``. Entries
+    already present are not duplicated; Linux gets its ``PATH`` back untouched.
     """
     env_path = os.environ.get("PATH", "") if env_path is None else env_path
     system = system or platform.system()
-    if system != "Darwin":
-        return env_path
-    # ":" is macOS's separator regardless of the host running this code
-    # (the unit tests exercise the Darwin branch from Windows too).
-    present = env_path.split(":") if env_path else []
-    missing = [p for p in _MACOS_EXTRA_PATH if p not in present]
-    return ":".join(present + missing)
+    # The target's separator, not the host's (the unit tests exercise both
+    # branches from either OS).
+    sep = ";" if system == "Windows" else ":"
+    present = env_path.split(sep) if env_path else []
+    tools = audio_tools_dir(system=system, data_dir=data_dir)
+    first = [str(tools)] if tools is not None and str(tools) not in present else []
+    extra = _MACOS_EXTRA_PATH if system == "Darwin" else ()
+    last = [p for p in extra if p not in present]
+    return sep.join(first + present + last)

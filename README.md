@@ -46,15 +46,14 @@ cache and reused afterwards.
 
 | | |
 |---|---|
-| **OS** | macOS 13 or newer, or Windows 10/11 (64-bit). |
-| **ffmpeg + SoX** | On `PATH`. macOS: `brew install ffmpeg sox`. Windows: install both and add them to `PATH`. |
+| **OS** | macOS 13 or newer on Apple Silicon, or Windows 10/11 (64-bit). |
 | **Disk** | ~1.5 GB for the app (most of it is torch). |
 
-`mp4box` (GPAC 26.07) is bundled — you do not need to install it. On macOS it is a
-static universal binary, so the app runs natively on Apple Silicon and Intel.
+Nothing else to install: ffmpeg, ffprobe, SoX and `mp4box` (GPAC 26.07) are
+bundled, and the app uses its own copies even if you have others installed.
 
-> If Homebrew is not installed yet:
-> `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
+Intel Macs are not supported — PyTorch stopped publishing x86_64 macOS builds,
+so there is no torch for the app to ship there.
 
 ---
 
@@ -75,8 +74,9 @@ The window has no title bar — drag it anywhere by its body, close it with the
 
 Requires Python 3.13 (pinned — Nuitka's 3.14 support is not ready yet) and
 [uv](https://docs.astral.sh/uv/), which the Makefile bootstraps if it is not
-already on `PATH`. Only `python3` is needed on a fresh clone. ffmpeg and SoX
-must be installed to actually run the app (see above).
+already on `PATH`. Only `python3` is needed on a fresh clone. The bundled
+ffmpeg / ffprobe / SoX in `AUDIO_mac/` / `AUDIO_win/` are used from source too;
+on Linux, install ffmpeg and SoX yourself.
 
 ```bash
 git clone https://github.com/hdavid/stemgen.git
@@ -118,6 +118,7 @@ src/
   runtime.py          dev-vs-bundle detection, bundled-data paths
 GPAC_mac/ GPAC_win/   mp4box shipped inside the app (macOS: static universal build, see scripts/build_mp4box_macos.sh)
 GPAC_linux/           (kept for running from source on Linux)
+AUDIO_mac/ AUDIO_win/ static ffmpeg / ffprobe / SoX shipped inside the app (built by scripts/build_audio_tools.sh mac|win)
 assets/               icon, .dmg background
 scripts/              build (Nuitka), packaging (.dmg / .msi), signing
 tests/unit/           headless — no Qt, no ffmpeg, no model download
@@ -128,3 +129,6 @@ tests/unit/           headless — no Qt, no ffmpeg, no model download
 ## Licence
 
 MIT — see [LICENSE](LICENSE). Demucs is MIT; GPAC is LGPL-2.1; PySide6 is LGPL-3.0.
+The bundled ffmpeg is LGPL-2.1 (built without GPL parts); SoX and libmad are
+GPL-2.0 and ship as separate executables. Their licences and exact source URLs
+are in `AUDIO_mac/LICENSES/` and `AUDIO_win/LICENSES/`.
