@@ -94,8 +94,8 @@ help:
 	@.uv-bootstrap/bin/pip install --quiet uv
 	@echo "  uv $$(.uv-bootstrap/bin/uv --version | awk '{print $$2}') installed"
 
-venv: $(UV) ## uv sync — create/refresh .venv (runtime + build + dev deps)
-	$(UV) sync --python $(PYTHON_VERSION) --extra build --extra dev
+venv: $(UV) ## uv sync — create/refresh .venv (runtime + build + dev deps, PyPI torch)
+	$(UV) sync --python $(PYTHON_VERSION) --extra cpu --extra build --extra dev
 
 lock: $(UV) ## uv lock — refresh uv.lock
 	$(UV) lock --python $(PYTHON_VERSION)

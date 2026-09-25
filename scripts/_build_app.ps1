@@ -160,6 +160,17 @@ try {
         # torch/bin must stay: torch.__init__ refuses to import without
         # bin/torch_shm_manager. include/ is header payload only.
         '--noinclude-data-files=torch/include/*'
+        # CUDA torch (-Variant cuda) DLLs a GPU split never needs: each was
+        # removed from cu130 torch on an RTX 3080 and htdemucs still split to
+        # bit-identical output at the same speed (~360 MB). The rest of
+        # cuDNN is required - removing engines_runtime_compiled, heuristic,
+        # engines_precompiled or ops broke the split. No-ops for CPU torch.
+        # Guarded by tests/unit/test_build_scripts.py.
+        '--noinclude-dlls=torch/lib/cudnn_adv64_9.dll'
+        '--noinclude-dlls=torch/lib/cusolverMg64_12.dll'
+        '--noinclude-dlls=torch/lib/nvrtc64_130_0.alt.dll'
+        '--noinclude-dlls=torch/lib/curand64_10.dll'
+        '--noinclude-dlls=torch/lib/nvperf_host.dll'
         # GPAC ships with its layout intact so mp4box.exe finds its DLLs
         # next to it; runtime.mp4box_path() resolves it relative to the
         # launcher. --include-raw-dir, not --include-data-dir: Nuitka silently

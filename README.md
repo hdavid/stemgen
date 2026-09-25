@@ -32,12 +32,18 @@ Accepted input: `.wav`, `.wave`, `.aif`, `.aiff`, `.flac`, `.mp3`.
 ## Install
 
 Download the latest build from
-[Releases](https://github.com/hdavid/stemgen/releases):
+[Releases](https://github.com/w0ts/stemgen/releases):
 
 | | |
 |---|---|
 | **macOS** | `StemGen.dmg` — drag to Applications. |
-| **Windows** | `StemGenSetup.msi` — a normal Next/Next/Install wizard. |
+| **Windows, NVIDIA GPU** | `StemGenSetup-CUDA-….msi` — splits on the GPU (RTX 20xx or newer). Large: it carries CUDA. |
+| **Windows, anything else** | `StemGenSetup-….msi` — splits on the CPU. |
+
+Both Windows installers are a normal Next/Next/Install wizard and replace each
+other, so switching is just installing the other one. The CUDA build also runs
+without a usable NVIDIA GPU — it falls back to the CPU — it is just a much
+bigger download for nothing.
 
 The Demucs model weights (~80 MB) are downloaded on first run into your torch
 cache and reused afterwards.
@@ -98,6 +104,9 @@ make deploy    # macOS: build + install into /Applications, replacing the old co
 On Windows use `.\make.ps1 <target>` — same names, same behaviour, except
 that uv has to be installed first (`winget install --id=astral-sh.uv -e`);
 there is no bootstrap fallback there. `make help` lists everything.
+`.\make.ps1 package -Variant cuda` builds the CUDA installer instead, from its
+own `.venv-cuda` / `dist-cuda\` so the two torch builds never overwrite each
+other.
 
 Signing is optional: with no `DEVELOPER_ID_APP` in
 `.env.local` the macOS build signs ad-hoc and still runs locally; copy

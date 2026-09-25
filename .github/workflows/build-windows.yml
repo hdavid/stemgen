@@ -5,7 +5,11 @@ name: Build Windows MSI
 # (preinstalled on the runner; the package script installs the WiX global tool
 # itself).
 #
-# On a tag push (or a manual run with a tag) the MSI + its .sha256 are attached
+# Two self-contained installers per run (matrix `variant`):
+#   cpu   StemGenSetup-<ts>.msi       PyPI torch, runs anywhere
+#   cuda  StemGenSetup-CUDA-<ts>.msi  CUDA 13 torch for NVIDIA GPUs
+#
+# On a tag push (or a manual run with a tag) each MSI + its .sha256 is attached
 # to the GitHub Release for that tag. The macOS workflow attaches the .dmg to
 # the same release, so the two run independently and converge on one release.
 
@@ -69,6 +73,11 @@ jobs:
 
   build-msi:
     needs: pick-runner
+    strategy:
+      # One variant failing must not cancel the other's release upload.
+      fail-fast: false
+      matrix:
+        variant: [cpu, cuda]
     # Run when the picker succeeded OR was skipped by a forced dispatch.
     if: ${{ !cancelled() && (needs.pick-runner.result == 'success' || needs.pick-runner.result == 'skipped') }}
     # Release tag pushes build on the self-hosted PC. If it is offline the
@@ -95,24 +104,28 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~\AppData\Local\Nuitka\Nuitka\Cache
-          key: nuitka-windows-${{ github.sha }}
-          restore-keys: nuitka-windows-
+          key: nuitka-windows-${{ matrix.variant }}-${{ github.sha }}
+          restore-keys: nuitka-windows-${{ matrix.variant }}-
 
       - name: Unit tests
         shell: pwsh
-        run: ./make.ps1 test
+        run: ./make.ps1 test -Variant ${{ matrix.variant }}
 
       - name: Build MSI (make package)
         shell: pwsh
-        run: ./make.ps1 package
+        run: ./make.ps1 package -Variant ${{ matrix.variant }}
 
       - name: Locate artefacts
         id: artefacts
         shell: pwsh
         run: |
-          $msi = Get-ChildItem dist -Filter 'StemGenSetup*.msi' |
+          $dist = if ('${{ matrix.variant }}' -eq 'cuda') { 'dist-cuda' } else { 'dist' }
+          $msi = Get-ChildItem $dist -Filter 'StemGenSetup*.msi' |
                  Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          if (-not $msi) { throw "no MSI produced under dist/" }
+          if (-not $msi) { throw "no MSI produced under $dist/" }
+          # GitHub rejects release assets over 2 GiB; fail here with a clear
+          # message rather than on the upload.
+          if ($msi.Length -ge 2GB) { throw "$($msi.Name) is $([math]::Round($msi.Length/1GB,2)) GB - over GitHub's 2 GiB release-asset limit" }
           "msi=$($msi.FullName)"        >> $env:GITHUB_OUTPUT
           "sha=$($msi.FullName).sha256" >> $env:GITHUB_OUTPUT
 
@@ -141,9 +154,9 @@ jobs:
         uses: actions/upload-artifact@v5
         continue-on-error: true
         with:
-          name: windows-msi
+          name: windows-msi-${{ matrix.variant }}
           path: |
-            dist/StemGenSetup*.msi
-            dist/StemGenSetup*.msi.sha256
+            ${{ steps.artefacts.outputs.msi }}
+            ${{ steps.artefacts.outputs.sha }}
           if-no-files-found: error
           retention-days: 1 # release assets (above) are the durable copy

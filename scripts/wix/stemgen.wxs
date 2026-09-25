@@ -47,6 +47,14 @@
   <?define Version = 1.0.0 ?>
   <?endif ?>
 
+  <!--
+    Nuitka bundle to package, relative to this file: dist\ (cpu) or
+    dist-cuda\ (cuda), injected by _package_windows.ps1 via `-d BundleDir=…`.
+  -->
+  <?ifndef BundleDir ?>
+  <?define BundleDir = ..\..\dist\StemGenApp.dist ?>
+  <?endif ?>
+
   <Package
     Name="StemGen"
     Manufacturer="StemGen"
@@ -140,7 +148,7 @@
     <ComponentGroup Id="MainBinary" Directory="INSTALLFOLDER">
       <Component Id="MainExeComp">
         <File Id="MainExe"
-              Source="..\..\dist\StemGenApp.dist\StemGenApp.exe"
+              Source="$(BundleDir)\StemGenApp.exe"
               KeyPath="yes" />
       </Component>
     </ComponentGroup>
@@ -152,8 +160,8 @@
       uninstall removes every harvested file and its now-empty directories.
     -->
     <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
-      <Files Include="..\..\dist\StemGenApp.dist\**\*">
-        <Exclude Files="..\..\dist\StemGenApp.dist\StemGenApp.exe" />
+      <Files Include="$(BundleDir)\**\*">
+        <Exclude Files="$(BundleDir)\StemGenApp.exe" />
       </Files>
     </ComponentGroup>
 

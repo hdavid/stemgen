@@ -49,7 +49,8 @@ function Get-EnvOr {
 
 $AppName  = Get-EnvOr 'APP_NAME' 'StemGen'
 $Dist     = Get-EnvOr 'DIST'     'dist'
-$MsiStem  = 'StemGenSetup'
+# StemGenSetup (cpu) or StemGenSetup-CUDA - set by make.ps1 -Variant.
+$MsiStem  = Get-EnvOr 'MSI_STEM' 'StemGenSetup'
 
 # Repo root = parent of scripts\. Resolve absolute dist + wix paths so the
 # `wix build` run (which we launch from scripts\wix\) writes to the right place.
@@ -131,6 +132,7 @@ try {
         -acceptEula wix7 `
         -arch x64 `
         -d "Version=$msiVersion" `
+        -d "BundleDir=..\..\$Dist\StemGenApp.dist" `
         -ext WixToolset.UI.wixext `
         -ext WixToolset.Util.wixext `
         -o $msiOut

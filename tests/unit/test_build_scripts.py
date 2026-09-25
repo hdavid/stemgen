@@ -38,3 +38,36 @@ def test_checkpoint_pickle_modules_are_included(target, module):
 )
 def test_bundled_audio_tools_are_shipped(target, flag):
     assert flag in BUILDS[target].read_text()
+
+
+# CUDA-torch DLLs a GPU split never needs. Each was removed from a real
+# cu130 torch on an RTX 3080 and htdemucs still split 60 s of audio to
+# bit-identical output at the same speed. Nothing loads them at import time.
+UNNEEDED_CUDA_DLLS = [
+    "cudnn_adv64_9.dll",
+    "cusolverMg64_12.dll",
+    "nvrtc64_130_0.alt.dll",
+    "curand64_10.dll",
+    "nvperf_host.dll",
+]
+# Removing any of these broke the split (sub-library loading failures, or
+# "unable to find an engine") — they must never be excluded.
+REQUIRED_CUDA_DLLS = [
+    "cudnn_engines_runtime_compiled64_9.dll",
+    "cudnn_heuristic64_9.dll",
+    "cudnn_engines_precompiled64_9.dll",
+    "cudnn_ops64_9.dll",
+]
+
+
+@pytest.mark.parametrize("dll", UNNEEDED_CUDA_DLLS)
+def test_unneeded_cuda_dlls_are_excluded_on_windows(dll):
+    # Nuitka matches the path inside the bundle, not the bare filename.
+    assert f"--noinclude-dlls=torch/lib/{dll}" in BUILDS["win"].read_text()
+
+
+@pytest.mark.parametrize("dll", REQUIRED_CUDA_DLLS)
+def test_required_cuda_dlls_are_never_excluded(dll):
+    text = BUILDS["win"].read_text()
+    assert f"--noinclude-dlls=torch/lib/{dll}" not in text
+    assert "--noinclude-dlls=torch/lib/cudnn_*" not in text

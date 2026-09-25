@@ -8,6 +8,14 @@
     you can also call it directly:
 
         .\make.ps1 build
+        .\make.ps1 package -Variant cuda
+
+    -Variant picks the torch build (default: cpu):
+        cpu    PyPI torch, CPU only        .venv       dist\       StemGenSetup-<ts>.msi
+        cuda   CUDA 13 torch (NVIDIA GPU)  .venv-cuda  dist-cuda\  StemGenSetup-CUDA-<ts>.msi
+    Each variant keeps its own venv and dist so switching never reinstalls
+    ~2 GB of torch. Both MSIs share one UpgradeCode: installing one replaces
+    the other.
 
     Targets:
         help        list targets
@@ -29,7 +37,9 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [string]$Target = 'help'
+    [string]$Target = 'help',
+    [ValidateSet('cpu', 'cuda')]
+    [string]$Variant = 'cpu'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -39,8 +49,9 @@ Set-StrictMode -Version Latest
 $AppName       = 'StemGen'
 $Entry         = 'src/StemGenApp.py'
 $PythonVersion = '3.13'
-$Venv          = '.venv'
-$Dist          = 'dist'
+$Venv          = if ($Variant -eq 'cuda') { '.venv-cuda' } else { '.venv' }
+$Dist          = if ($Variant -eq 'cuda') { 'dist-cuda' } else { 'dist' }
+$MsiStem       = if ($Variant -eq 'cuda') { 'StemGenSetup-CUDA' } else { 'StemGenSetup' }
 $VenvPy        = Join-Path $Venv 'Scripts\python.exe'
 
 # Run from the repo root regardless of where the caller invoked us.
@@ -80,7 +91,7 @@ function Invoke-Help {
     Write-Host "  StemGen - Windows task runner" -ForegroundColor Cyan
     Write-Host ""
     $rows = @(
-        @('venv',      'uv sync - create/refresh .venv (runtime + build deps)'),
+        @('venv',      "uv sync - create/refresh $Venv (runtime + build deps, $Variant torch)"),
         @('lock',      'uv lock - refresh uv.lock'),
         @('run',       'run the app from source'),
         @('test',      'run the unit tests'),
@@ -94,13 +105,17 @@ function Invoke-Help {
         Write-Host $r[1]
     }
     Write-Host ""
-    Write-Host "  usage:  make <target>   or   .\make.ps1 <target>" -ForegroundColor DarkGray
+    Write-Host "  usage:  make <target>   or   .\make.ps1 <target> [-Variant cpu|cuda]" -ForegroundColor DarkGray
     Write-Host ""
 }
 
 function Invoke-Venv {
     $uv = Resolve-Uv
-    Invoke-Native $uv @('sync', '--python', $PythonVersion, '--extra', 'build', '--extra', 'dev')
+    # UV_PROJECT_ENVIRONMENT points uv at this variant's venv; --extra
+    # $Variant selects its torch (the cpu / cuda extras conflict in
+    # pyproject.toml, so exactly one torch is ever installed).
+    $env:UV_PROJECT_ENVIRONMENT = $Venv
+    Invoke-Native $uv @('sync', '--python', $PythonVersion, '--extra', $Variant, '--extra', 'build', '--extra', 'dev')
 }
 
 function Invoke-Lock {
@@ -138,6 +153,7 @@ function Invoke-Package {
     Invoke-Build
     $env:APP_NAME = $AppName
     $env:DIST     = $Dist
+    $env:MSI_STEM = $MsiStem
     Invoke-Native 'powershell' @(
         '-NoProfile', '-ExecutionPolicy', 'Bypass',
         '-File', 'scripts/_package_windows.ps1',
@@ -146,7 +162,7 @@ function Invoke-Package {
 }
 
 function Invoke-Clean {
-    foreach ($p in @('build', $Dist, "$Dist.lock", 'dist-nuitka')) {
+    foreach ($p in @('build', 'dist', 'dist.lock', 'dist-cuda', 'dist-cuda.lock', 'dist-nuitka')) {
         if (Test-Path $p) {
             Write-Host "  rm $p"
             Remove-Item $p -Recurse -Force
@@ -156,7 +172,7 @@ function Invoke-Clean {
 
 function Invoke-Distclean {
     Invoke-Clean
-    foreach ($p in @($Venv, '.uv-bootstrap')) {
+    foreach ($p in @('.venv', '.venv-cuda', '.uv-bootstrap')) {
         if (Test-Path $p) {
             Write-Host "  rm $p"
             Remove-Item $p -Recurse -Force

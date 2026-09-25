@@ -16,12 +16,19 @@ dependencies = [
     # numpy 1.x on top of them; that was a torch<2.3 wheel/ABI problem and
     # torch>=2.6 wheels are built against numpy 2, so no pin is needed.
     "demucs>=4.0.1",
-    "torch>=2.6.0",
     "torchaudio>=2.6.0",
     "numpy>=2.0",
 ]
 
 [project.optional-dependencies]
+# torch comes from exactly one of these two (they conflict — see [tool.uv]).
+# `cpu` is plain PyPI torch: CPU-only on Windows, MPS-capable on macOS. It is
+# what every default `make venv` / `.\make.ps1 venv` installs.
+cpu = ["torch>=2.6.0"]
+# `cuda` swaps in PyTorch's CUDA 13 build on Windows (RTX 20xx and newer; it
+# falls back to CPU without a usable NVIDIA GPU). Build with
+# `.\make.ps1 package -Variant cuda` — separate .venv-cuda / dist-cuda.
+cuda = ["torch>=2.6.0"]
 # Tools needed to ship a built .app / .exe — not required at runtime.
 # Activate with: uv sync --extra build
 build = [
@@ -41,6 +48,23 @@ dev = [
     "ruff>=0.5",
     "pytest>=8.0",
 ]
+
+[tool.uv]
+conflicts = [
+    [{ extra = "cpu" }, { extra = "cuda" }],
+]
+
+[tool.uv.sources]
+# Only the cuda extra, only on Windows, reads the PyTorch index; everything
+# else resolves torch from PyPI. Guarded by tests/unit/test_torch_variants.py.
+torch = [
+    { index = "pytorch-cu130", extra = "cuda", marker = "sys_platform == 'win32'" },
+]
+
+[[tool.uv.index]]
+name     = "pytorch-cu130"
+url      = "https://download.pytorch.org/whl/cu130"
+explicit = true
 
 [build-system]
 requires      = ["setuptools>=68"]
