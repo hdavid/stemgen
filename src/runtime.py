@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import platform
+import subprocess
 import sys
 from pathlib import Path
 
@@ -109,3 +110,41 @@ def augmented_path(
     extra = _MACOS_EXTRA_PATH if system == "Darwin" else ()
     last = [p for p in extra if p not in present]
     return sep.join(first + present + last)
+
+
+# Win32 process-creation flag: start a console program without giving it a
+# console window. Spelled out because subprocess only defines it on Windows.
+CREATE_NO_WINDOW = 0x08000000
+
+
+def hide_console_windows(system: str | None = None, module=subprocess) -> bool:
+    """Make every child process start without a console window (Windows only).
+
+    The app is a GUI binary, so on Windows each console program it runs —
+    sox, ffprobe, ffmpeg, mp4box, from our code and from demucs's — would
+    otherwise flash a console window. Rather than threading a flag through
+    every call site (demucs's included), this swaps ``module.Popen`` for a
+    subclass that ORs ``CREATE_NO_WINDOW`` into ``creationflags``;
+    ``subprocess.run`` / ``check_output`` / ``call`` all construct ``Popen``
+    through the module attribute, so they pick it up. Call it once at
+    startup, before anything spawns a process.
+
+    Returns True if the patch is (now) in place. A no-op elsewhere, where
+    ``creationflags`` is not supported. ``module`` is injectable for tests.
+    """
+    system = system or platform.system()
+    if system != "Windows":
+        return False
+    base = module.Popen
+    if getattr(base, "_stemgen_no_window", False):
+        return True
+
+    class _NoWindowPopen(base):
+        _stemgen_no_window = True
+
+        def __init__(self, *args, **kwargs):
+            kwargs["creationflags"] = kwargs.get("creationflags", 0) | CREATE_NO_WINDOW
+            super().__init__(*args, **kwargs)
+
+    module.Popen = _NoWindowPopen
+    return True

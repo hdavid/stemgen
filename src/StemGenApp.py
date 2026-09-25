@@ -10,12 +10,15 @@ from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import QApplication, QFileDialog, QMainWindow
 
 from layout import Ui_MainWindow
-from runtime import augmented_path
+from runtime import augmented_path, hide_console_windows
 
 # Must run before `stemgen` is imported: torch probes the environment at
 # import time and StemGen.setup() looks ffmpeg/sox up on PATH. A bundle
 # launched from Finder gets launchd's PATH, which has no Homebrew in it.
 os.environ["PATH"] = augmented_path()
+# Windows: no console window flashing up for every sox/ffmpeg/ffprobe/mp4box
+# call (ours and demucs's). No-op on macOS/Linux.
+hide_console_windows()
 
 from stemgen import StemGen
 

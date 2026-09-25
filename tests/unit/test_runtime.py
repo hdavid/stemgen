@@ -79,3 +79,46 @@ def test_augmented_path_is_idempotent(system):
 
 def test_augmented_path_untouched_on_linux():
     assert runtime.augmented_path("/usr/bin", system="Linux") == "/usr/bin"
+
+
+class _FakeSubprocess:
+    """Stands in for the subprocess module: its Popen records the kwargs it gets."""
+
+    def __init__(self):
+        self.calls = []
+        calls = self.calls
+
+        class Popen:
+            def __init__(self, *args, **kwargs):
+                calls.append(kwargs)
+
+        self.Popen = Popen
+
+
+def test_hide_console_windows_sets_create_no_window_on_windows():
+    # A GUI app on Windows flashes a console window for every console child
+    # (sox, ffprobe, ffmpeg, mp4box — ours and demucs's) unless each gets
+    # CREATE_NO_WINDOW. subprocess.run/check_output all go through Popen.
+    fake = _FakeSubprocess()
+    assert runtime.hide_console_windows(system="Windows", module=fake) is True
+    fake.Popen(["sox"])
+    fake.Popen(["ffmpeg"], creationflags=0x00000200)  # caller's own flags survive
+    assert fake.calls[0]["creationflags"] == runtime.CREATE_NO_WINDOW
+    assert fake.calls[1]["creationflags"] == 0x00000200 | runtime.CREATE_NO_WINDOW
+
+
+def test_hide_console_windows_is_idempotent():
+    fake = _FakeSubprocess()
+    runtime.hide_console_windows(system="Windows", module=fake)
+    runtime.hide_console_windows(system="Windows", module=fake)
+    fake.Popen(["sox"])
+    assert fake.calls[0]["creationflags"] == runtime.CREATE_NO_WINDOW
+
+
+@pytest.mark.parametrize("system", ["Darwin", "Linux"])
+def test_hide_console_windows_noop_elsewhere(system):
+    # creationflags is Windows-only; POSIX Popen raises if it is set.
+    fake = _FakeSubprocess()
+    original = fake.Popen
+    assert runtime.hide_console_windows(system=system, module=fake) is False
+    assert fake.Popen is original
